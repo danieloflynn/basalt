@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Basalt</string>
+    <string name="title_activity_main">Basalt</string>
+    <string name="package_name">com.danielpoflynn.basalt</string>
+    <string name="custom_url_scheme">com.danielpoflynn.basalt</string>
+</resources>
