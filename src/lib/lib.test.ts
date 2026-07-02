@@ -133,4 +133,11 @@ describe('buildTree', () => {
     expect([...walkFiles(tree)].map((f) => f.path)).toContain('notes/a.md');
     expect([...walkFiles(tree)].map((f) => f.path)).not.toContain('.obsidian/x.json');
   });
+
+  it('surfaces folders whose only content is hidden (.gitkeep)', () => {
+    const tree = buildTree(['drafts/.gitkeep', 'a.md', '.obsidian/app.json', 'x/.trash/gone.md']);
+    expect(tree.children.map((c) => c.name)).toEqual(['drafts', 'a.md']);
+    const drafts = tree.children.find((c) => c.name === 'drafts');
+    expect(drafts?.kind === 'folder' && drafts.children.length).toBe(0);
+  });
 });

@@ -1,4 +1,4 @@
-import { basename, isHiddenPath } from './paths';
+import { basename, dirname, isHiddenPath } from './paths';
 
 export interface TreeFile {
   kind: 'file';
@@ -31,9 +31,14 @@ export function buildTree(paths: Iterable<string>): TreeFolder {
   };
 
   for (const path of paths) {
-    if (isHiddenPath(path)) continue;
-    const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
-    ensureFolder(dir).children.push({ kind: 'file', name: basename(path), path });
+    if (isHiddenPath(path)) {
+      // A hidden file still marks its folder as existing: "drafts/.gitkeep"
+      // must surface "drafts" (folders created in-app hold only a .gitkeep).
+      const dir = dirname(path);
+      if (dir && !isHiddenPath(dir)) ensureFolder(dir);
+      continue;
+    }
+    ensureFolder(dirname(path)).children.push({ kind: 'file', name: basename(path), path });
   }
 
   for (const folder of folders.values()) sortChildren(folder);
