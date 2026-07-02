@@ -1,0 +1,108 @@
+/*
+ * Basalt design tokens — cooled volcanic rock with a live seam.
+ * Dark is the native state (fresh basalt); light is quarry stone in daylight.
+ * Ember = molten interior: sync activity, primary actions. Used sparingly.
+ * Celadonite = the green mineral in basalt vesicles: links between notes.
+ */
+
+:root {
+  /* Type */
+  --font-ui: 'Inter Variable', system-ui, sans-serif;
+  --font-display: 'Fraunces Variable', Georgia, serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
+
+  --text-xs: 0.75rem; /* 12 captions, metadata */
+  --text-sm: 0.8125rem; /* 13 secondary UI */
+  --text-md: 0.9375rem; /* 15 primary UI */
+  --text-body: calc(1.0625rem * var(--font-scale, 1)); /* 17 reading */
+  --text-lg: 1.25rem; /* 20 */
+  --text-xl: 1.5rem; /* 24 screen titles */
+  --text-2xl: 1.875rem; /* 30 note H1 */
+
+  --leading-reading: 1.7;
+  --leading-ui: 1.45;
+
+  /* Shape — small radii: stone-cut, not pebble */
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+
+  /* Motion */
+  --ease: cubic-bezier(0.25, 0.8, 0.35, 1);
+  --dur: 180ms;
+
+  /* Layout */
+  --pad-screen: 18px;
+  --touch: 44px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --bg: #131215;
+  --surface: #1b1a1e;
+  --surface-raised: #242229;
+  --surface-press: #2c2a32;
+  --border: #2e2c34;
+  --border-strong: #403d47;
+
+  --text: #e9e6e0;
+  --text-muted: #a29e97;
+  --text-faint: #6f6b66;
+
+  --ember: #e8764a;
+  --ember-strong: #d45a31;
+  --ember-soft: rgba(232, 118, 74, 0.14);
+  --on-ember: #1a0f0a;
+
+  --link: #85b8a3;
+  --link-soft: rgba(133, 184, 163, 0.13);
+  --unresolved: #8d8878;
+
+  --code-bg: #201f25;
+  --danger: #d4685c;
+  --danger-soft: rgba(212, 104, 92, 0.14);
+
+  --column-rock: #35323b;
+  --column-rock-lit: #4a4653;
+
+  --shadow-raised: 0 6px 24px rgba(0, 0, 0, 0.45);
+  --overlay-scrim: rgba(8, 7, 10, 0.6);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --bg: #f1f0ee;
+  --surface: #fafaf8;
+  --surface-raised: #ffffff;
+  --surface-press: #e9e8e5;
+  --border: #dfddd8;
+  --border-strong: #c9c7c1;
+
+  --text: #27242b;
+  --text-muted: #605d66;
+  --text-faint: #928f97;
+
+  --ember: #c75a32;
+  --ember-strong: #ab4623;
+  --ember-soft: rgba(199, 90, 50, 0.12);
+  --on-ember: #fff6f2;
+
+  --link: #2e7360;
+  --link-soft: rgba(46, 115, 96, 0.11);
+  --unresolved: #98917d;
+
+  --code-bg: #eceae6;
+  --danger: #b74f43;
+  --danger-soft: rgba(183, 79, 67, 0.12);
+
+  --column-rock: #cfcdc7;
+  --column-rock-lit: #b8b5ae;
+
+  --shadow-raised: 0 6px 20px rgba(40, 36, 48, 0.14);
+  --overlay-scrim: rgba(38, 34, 44, 0.35);
+}
