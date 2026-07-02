@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { setVaultDir } from '@/engine';
 import { syncService, useSettings, vaultService } from '@/services';
 import { useNav } from '@/state/nav';
+import { IconPlus } from '@/ui/icons';
 import { OnboardingScreen } from '@/ui/screens/OnboardingScreen';
 
 /** Vault switcher popup (mirrors Obsidian's "Manage vaults…" menu). */
@@ -59,7 +60,9 @@ export function VaultMenu({ onClose }: { onClose: () => void }) {
         ))}
         <button className="vault-menu__item" onClick={() => setAdding(true)}>
           Add vault…
-          <span className="vault-menu__radio" aria-hidden="true" />
+          <span className="vault-menu__action" aria-hidden="true">
+            <IconPlus size={20} />
+          </span>
         </button>
       </div>
     </>

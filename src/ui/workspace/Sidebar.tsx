@@ -40,9 +40,9 @@ const VIEWS: {
 /**
  * Obsidian-style left sidebar: the active view fills the screen, a floating
  * pill switches views, and the vault bar (name, stats, settings) sits at the
- * bottom.
+ * bottom. Stays mounted; `open` drives the slide transition (swipes scrub it).
  */
-export function Sidebar() {
+export function Sidebar({ open }: { open: boolean }) {
   const nav = useNav();
   const view = useNav((s) => s.sidebarView);
   const [switcherOpen, setSwitcherOpen] = useState(false);
@@ -65,7 +65,7 @@ export function Sidebar() {
     'Vault';
 
   return (
-    <div className="sidebar">
+    <div className="sidebar" data-open={open || undefined} aria-hidden={!open}>
       <div className="sidebar__content">
         {view === 'files' && <FilesPanel />}
         {view === 'search' && <SearchPanel />}
@@ -381,6 +381,14 @@ function SearchPanel() {
     [query, indexVersion],
   );
 
+  const terms = useMemo(
+    () =>
+      query
+        .split(/\s+/)
+        .filter((w) => w && !/^(tag|path|file):/i.test(w)),
+    [query],
+  );
+
   return (
     <div className="sidebar-panel">
       <input
@@ -393,6 +401,12 @@ function SearchPanel() {
         autoCapitalize="none"
         autoCorrect="off"
       />
+      {query.trim() === '' && (
+        <p className="state__hint" style={{ padding: '20px 16px' }}>
+          Search every note in this vault. Narrow results with <code>tag:x</code>,{' '}
+          <code>path:folder</code> or <code>file:name</code>.
+        </p>
+      )}
       {query.trim() !== '' && hits.length === 0 && (
         <p className="state__hint" style={{ padding: '20px 16px' }}>
           No matches. Operators: <code>tag:x</code> <code>path:folder</code> <code>file:name</code>
@@ -406,13 +420,23 @@ function SearchPanel() {
           onClick={() => useNav.getState().push({ name: 'note', path: h.path })}
         >
           <span className="tree-row__name" style={{ fontWeight: 550 }}>
-            {h.title}
+            {highlightTerms(h.title, terms)}
           </span>
-          {h.excerpt && <span className="hit__excerpt">{h.excerpt}</span>}
+          {h.excerpt && <span className="hit__excerpt">{highlightTerms(h.excerpt, terms)}</span>}
         </button>
       ))}
     </div>
   );
+}
+
+/** Wrap query terms in <mark> so hits show why they matched. */
+function highlightTerms(text: string, terms: string[]): React.ReactNode {
+  if (terms.length === 0) return text;
+  const escaped = terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const re = new RegExp(`(${escaped.join('|')})`, 'ig');
+  const parts = text.split(re);
+  if (parts.length === 1) return text;
+  return parts.map((part, i) => (i % 2 === 1 ? <mark key={i}>{part}</mark> : part));
 }
 
 // ---------------------------------------------------------------------------

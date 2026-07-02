@@ -22,7 +22,11 @@ import {
   rehypeSpecialBlocks,
   rehypeTasks,
 } from './rehypePlugins';
-import { remarkDropFrontmatter, remarkObsidian } from './remarkObsidian';
+import {
+  remarkDropFrontmatter,
+  remarkObsidian,
+  remarkPromoteDisplayMath,
+} from './remarkObsidian';
 
 const MathBlock = lazy(() => import('./MathBlock'));
 const MermaidBlock = lazy(() => import('./MermaidBlock'));
@@ -302,7 +306,7 @@ function NoteEmbed({ target, heading, block }: { target: string; heading?: strin
     : heading
       ? extractSection(text, heading)
       : text;
-  const label = heading ? ` › ${heading}` : block ? ` › ^${block}` : '';
+  const label = heading ? ` › ${heading}` : '';
   return (
     <span className="embed" style={{ display: 'block' }}>
       <span className="embed__title" style={{ display: 'block' }}>
@@ -374,6 +378,7 @@ const processor = unified()
   .use(remarkParse)
   .use(remarkGfm)
   .use(remarkMath, { singleDollarTextMath: true })
+  .use(remarkPromoteDisplayMath)
   .use(remarkFrontmatter, ['yaml'])
   .use(remarkDropFrontmatter)
   .use(remarkObsidian)

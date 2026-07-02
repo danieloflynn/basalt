@@ -20,7 +20,9 @@ import { OnboardingScreen } from '@/ui/screens/OnboardingScreen';
 import { SettingsScreen } from '@/ui/screens/SettingsScreen';
 import { BottomPill } from '@/ui/workspace/BottomPill';
 import { SidebarToggle } from '@/ui/workspace/chrome';
+import { DrawerGestures } from '@/ui/workspace/DrawerGestures';
 import { Sidebar } from '@/ui/workspace/Sidebar';
+import { usePullDown } from '@/ui/hooks/usePullDown';
 import './styles/tokens.css';
 import './styles/app.css';
 import './styles/markdown.css';
@@ -125,7 +127,9 @@ export function App() {
   }
 
   const screen = currentScreen(nav);
-  const showPill = screen.name === 'empty' || screen.name === 'note' || screen.name === 'edit';
+  const showPill =
+    (screen.name === 'empty' || screen.name === 'note' || screen.name === 'edit') &&
+    !nav.editorFocused; // typing: the format toolbar takes the pill's place
 
   return (
     <div className="shell">
@@ -134,13 +138,28 @@ export function App() {
         <Banners />
       </div>
       {showPill && <BottomPill />}
-      {sidebarOpen && (
-        <>
-          <div className="scrim scrim--sidebar" onClick={() => nav.closeSidebar()} />
-          <Sidebar />
-        </>
-      )}
+      <SidebarLayer open={sidebarOpen} />
+      <DrawerGestures />
     </div>
+  );
+}
+
+/**
+ * The drawer stays mounted so swipe gestures can scrub it and the close
+ * transition can play; `data-open` drives the CSS open/close transition,
+ * gestures drive it inline mid-drag.
+ */
+function SidebarLayer({ open }: { open: boolean }) {
+  const nav = useNav();
+  return (
+    <>
+      <div
+        className="scrim scrim--sidebar"
+        data-open={open || undefined}
+        onClick={() => nav.closeSidebar()}
+      />
+      <Sidebar open={open} />
+    </>
   );
 }
 
@@ -172,8 +191,9 @@ function WorkspaceScreen({ screen }: { screen: Screen }) {
 /** "No file is open" — Obsidian's empty state, Basalt-flavored. */
 function EmptyView() {
   const nav = useNav();
+  const pullRef = usePullDown<HTMLDivElement>(() => nav.setOverlay('quickopen'));
   return (
-    <div className="screen">
+    <div className="screen" ref={pullRef}>
       <header className="workspace-top">
         <SidebarToggle />
       </header>

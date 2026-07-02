@@ -4,6 +4,7 @@ import { getVaultFS, type VaultFileInfo } from '@/engine';
 import { parseFrontmatter } from '@/lib/frontmatter';
 import { extractOutline, type HeadingInfo } from '@/lib/outline';
 import { extractTags, stripCode } from '@/lib/tags';
+import { stripInlineMarkdown } from '@/lib/plaintext';
 import { buildTree, type TreeFolder } from '@/lib/tree';
 import { isHiddenPath, isMarkdownPath, joinPath, noteTitle } from '@/lib/paths';
 import { LinkResolver, parseWikilinks } from '@/lib/wikilinks';
@@ -594,7 +595,7 @@ export class VaultService {
   private excerptFor(path: string, query: string): string | null {
     const text = this.contents.get(path);
     if (!text) return null;
-    const body = parseFrontmatter(text).body;
+    const body = stripInlineMarkdown(parseFrontmatter(text).body);
     const firstTerm = query.split(/\s+/)[0]?.toLowerCase() ?? '';
     const at = body.toLowerCase().indexOf(firstTerm);
     if (at === -1) return body.slice(0, EXCERPT_RADIUS * 2).replace(/\s+/g, ' ').trim() || null;

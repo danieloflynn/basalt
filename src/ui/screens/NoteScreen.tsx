@@ -7,6 +7,7 @@ import { IconDots, IconPencil } from '@/ui/icons';
 import { Markdown, scrollToHeading } from '@/ui/markdown/Markdown';
 import { NoteMenu } from '@/ui/components/NoteMenu';
 import { SidebarToggle } from '@/ui/workspace/chrome';
+import { usePullDown } from '@/ui/hooks/usePullDown';
 
 /** Reading view — Obsidian layout: sidebar toggle left, edit + menu right, inline title. */
 export function NoteScreen({ path, heading }: { path: string; heading?: string }) {
@@ -14,6 +15,8 @@ export function NoteScreen({ path, heading }: { path: string; heading?: string }
   const [text, setText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  // Obsidian's pull-down-to-search, on the reading scroller.
+  const scrollRef = usePullDown<HTMLDivElement>(() => nav.setOverlay('quickopen'));
 
   useEffect(() => {
     let cancelled = false;
@@ -69,7 +72,7 @@ export function NoteScreen({ path, heading }: { path: string; heading?: string }
         </div>
       </header>
 
-      <div className="scroll">
+      <div className="scroll" ref={scrollRef}>
         {error !== null && (
           <div className="state">
             <p className="state__title">Couldn't open this note</p>

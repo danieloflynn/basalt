@@ -11,6 +11,9 @@ export type Screen =
 
 export type SidebarView = 'files' | 'search' | 'tags' | 'properties' | 'bookmarks';
 
+/** Workspace overlays (bottom-pill popups); global so gestures can open them. */
+export type Overlay = 'none' | 'quickopen' | 'tabs' | 'palette';
+
 interface Tab {
   /** Visited screens; index points at the current one (enables forward). */
   history: Screen[];
@@ -40,6 +43,13 @@ interface NavState {
   /** Prefill the sidebar search view and open it (tag taps etc.). */
   searchSeed: string | null;
   seedSearch: (query: string) => void;
+
+  overlay: Overlay;
+  setOverlay: (overlay: Overlay) => void;
+
+  /** Editor has the keyboard: toolbar replaces the bottom pill (Obsidian). */
+  editorFocused: boolean;
+  setEditorFocused: (focused: boolean) => void;
 
   newTab: (screen?: Screen) => void;
   closeTab: (index: number) => void;
@@ -73,7 +83,11 @@ export const useNav = create<NavState>((set, get) => ({
     })),
 
   back: () => {
-    const { tabs, active, sidebarOpen } = get();
+    const { tabs, active, sidebarOpen, overlay } = get();
+    if (overlay !== 'none') {
+      set({ overlay: 'none' });
+      return true;
+    }
     if (sidebarOpen) {
       set({ sidebarOpen: false });
       return true;
@@ -107,7 +121,8 @@ export const useNav = create<NavState>((set, get) => ({
     return tab.index < tab.history.length - 1;
   },
 
-  reset: () => set({ tabs: [newTabState()], active: 0, sidebarOpen: false, sidebarView: 'files' }),
+  reset: () =>
+    set({ tabs: [newTabState()], active: 0, sidebarOpen: false, sidebarView: 'files', overlay: 'none' }),
 
   openSidebar: (view) =>
     set((s) => ({ sidebarOpen: true, sidebarView: view ?? s.sidebarView })),
@@ -116,6 +131,12 @@ export const useNav = create<NavState>((set, get) => ({
   searchSeed: null,
   seedSearch: (query) =>
     set({ searchSeed: query, sidebarView: 'search', sidebarOpen: true }),
+
+  overlay: 'none',
+  setOverlay: (overlay) => set({ overlay }),
+
+  editorFocused: false,
+  setEditorFocused: (focused) => set({ editorFocused: focused }),
 
   newTab: (screen) =>
     set((s) => ({

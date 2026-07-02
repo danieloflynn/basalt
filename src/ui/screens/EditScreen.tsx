@@ -32,6 +32,7 @@ const AUTOSAVE_MS = 800;
 
 export function EditScreen({ path }: { path: string }) {
   const nav = useNav();
+  const editorFocused = useNav((s) => s.editorFocused);
   const editorMode = useSettings((s) => s.settings.editorMode);
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -76,6 +77,9 @@ export function EditScreen({ path }: { path: string }) {
               autocorrect: 'on',
             }),
             EditorView.updateListener.of((u) => {
+              if (u.focusChanged) {
+                useNav.getState().setEditorFocused(u.view.hasFocus);
+              }
               if (!u.docChanged) return;
               dirtyRef.current = true;
               setSaveState('typing');
@@ -98,6 +102,7 @@ export function EditScreen({ path }: { path: string }) {
       }
       viewRef.current = null;
       setLoaded(false);
+      useNav.getState().setEditorFocused(false);
     };
   }, [path, editorMode]);
 
@@ -142,7 +147,8 @@ export function EditScreen({ path }: { path: string }) {
       <div ref={hostRef} style={{ flex: 1, minHeight: 0, overflow: 'hidden' }} />
       {!loaded && <div className="state" />}
 
-      <Toolbar viewRef={viewRef} />
+      {/* Obsidian behavior: the toolbar rides the keyboard, the pill fills in otherwise. */}
+      {editorFocused && <Toolbar viewRef={viewRef} />}
       {menuOpen && <NoteMenu path={path} onClose={() => setMenuOpen(false)} />}
     </div>
   );
@@ -161,6 +167,8 @@ function Toolbar({ viewRef }: { viewRef: React.RefObject<EditorView | null> }) {
 
   return (
     <div
+      // Keep taps here from blurring the editor (which would hide this bar).
+      onPointerDown={(e) => e.preventDefault()}
       style={{
         display: 'flex',
         justifyContent: 'space-around',

@@ -97,8 +97,6 @@ tags: [demo]
 status: draft
 ---
 
-# Showcase
-
 Everything Obsidian-flavored in one note. ==Highlights render== like this.
 %%This comment is invisible in reading view.%%
 
@@ -127,7 +125,7 @@ graph LR
 > [!tip]- Folded callout
 > This callout starts collapsed — tap to open.
 
-Sized image: ![[img.png|120]]
+A link to a note that doesn't exist yet renders muted: [[Future Idea]].
 `,
   'Templates/Meeting.md': `# {{title}}
 

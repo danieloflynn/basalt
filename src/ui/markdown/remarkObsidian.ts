@@ -123,3 +123,29 @@ export function remarkDropFrontmatter() {
     tree.children = tree.children.filter((n) => n.type !== ('yaml' as typeof n.type));
   };
 }
+
+/**
+ * Obsidian renders one-line `$$…$$` as display math, but micromark parses it
+ * as inline (the flow form needs the fences on their own lines). Promote an
+ * inline-math node that is a paragraph's sole child AND was written with `$$`.
+ */
+export function remarkPromoteDisplayMath() {
+  return (tree: Root, file: { value?: unknown }) => {
+    const source = typeof file.value === 'string' ? file.value : '';
+    visit(tree, 'paragraph', (node: Parent, index, parent) => {
+      if (!parent || index === undefined || node.children.length !== 1) return;
+      const only = node.children[0];
+      if (only.type !== ('inlineMath' as typeof only.type)) return;
+      const at = only.position?.start.offset;
+      if (at === undefined || source.slice(at, at + 2) !== '$$') return;
+      // Keep the parser's node (it carries the hast mapping in `data`);
+      // just retag it as display and lift it out of the paragraph.
+      const cls = (only.data as { hProperties?: { className?: string[] } } | undefined)
+        ?.hProperties?.className;
+      const i = cls?.indexOf('math-inline') ?? -1;
+      if (!cls || i === -1) return;
+      cls[i] = 'math-display';
+      parent.children[index] = only as (typeof parent.children)[number];
+    });
+  };
+}

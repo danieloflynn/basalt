@@ -8,6 +8,11 @@ dist/
 *.local
 .env
 
+# Test artifacts (baselines in tests/visual/__screenshots__ ARE tracked)
+test-results/
+playwright-report/
+.qa/
+
 # OS / editor
 .DS_Store
 .idea/

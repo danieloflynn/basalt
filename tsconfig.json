@@ -18,5 +18,5 @@
     "paths": { "@/*": ["./src/*"] },
     "types": ["vite/client"]
   },
-  "include": ["src", "capacitor.config.ts", "vite.config.ts"]
+  "include": ["src", "tests", "capacitor.config.ts", "vite.config.ts", "playwright.config.ts"]
 }

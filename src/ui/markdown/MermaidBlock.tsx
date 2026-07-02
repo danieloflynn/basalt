@@ -41,6 +41,7 @@ export default function MermaidBlock({ source }: { source: string }) {
   }
   return (
     <span
+      className="mermaid-figure"
       style={{ display: 'block', overflowX: 'auto' }}
       dangerouslySetInnerHTML={{ __html: svg }}
     />

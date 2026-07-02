@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { vaultService } from '@/services';
 import { useNav } from '@/state/nav';
 import { IconBack, IconCommand, IconPlus, IconSearch } from '@/ui/icons';
@@ -8,12 +7,14 @@ import { TabsSheet } from '@/ui/components/TabsSheet';
 
 /**
  * Obsidian's floating bottom toolbar: back / forward / quick open / new note /
- * tabs / command palette.
+ * tabs / command palette. Overlay state lives in nav so gestures (pull-down)
+ * can open Quick Open too.
  */
 export function BottomPill() {
   const nav = useNav();
   const tabCount = useNav((s) => s.tabs.length);
-  const [overlay, setOverlay] = useState<'none' | 'quickopen' | 'tabs' | 'palette'>('none');
+  const overlay = useNav((s) => s.overlay);
+  const setOverlay = nav.setOverlay;
 
   return (
     <>

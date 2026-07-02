@@ -12,6 +12,14 @@
   margin-top: 0.9em;
 }
 
+/* ==highlights== — same ember wash as the live-preview editor */
+.md mark {
+  background: var(--ember-soft);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 0.15em;
+}
+
 .md h1,
 .md h2,
 .md h3,
@@ -258,6 +266,34 @@
   font-weight: 650;
   font-size: var(--text-md);
   color: var(--callout-color, var(--text));
+}
+
+/* Foldable callouts ([!kind]- / [!kind]+) advertise the fold with a chevron */
+details.callout > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+details.callout > summary::-webkit-details-marker {
+  display: none;
+}
+
+details.callout > summary::after {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+  margin-left: auto;
+  margin-right: 4px;
+  opacity: 0.7;
+  flex-shrink: 0;
+  transition: transform 150ms var(--ease);
+}
+
+details.callout[open] > summary::after {
+  transform: rotate(45deg);
 }
 
 .callout__body > * + * {

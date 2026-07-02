@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { getGitEngine, useSyncProgress } from '@/engine/hooks';
 import { setVaultDir } from '@/engine';
 import { syncService, useSettings, vaultService } from '@/services';
-import { IconBack } from '@/ui/icons';
+import { IconBack, IconChevronRight } from '@/ui/icons';
 
 type Step = 'welcome' | 'connect' | 'branch' | 'cloning';
 
@@ -206,7 +206,7 @@ export function OnboardingScreen({
             )}
             <div className="rowlist">
               {branches.map((b) => (
-                <button key={b} className="row" onClick={() => void clone(b)}>
+                <button key={b} className="row row--card" onClick={() => void clone(b)}>
                   <span className="row__body">
                     <span className="row__title" style={{ display: 'block' }}>
                       {b}
@@ -217,6 +217,7 @@ export function OnboardingScreen({
                       </span>
                     )}
                   </span>
+                  <IconChevronRight size={18} className="row__chevron" />
                 </button>
               ))}
             </div>

@@ -1,12 +1,22 @@
 # Basalt — working notes
 
 Android markdown vault app (Obsidian feel, GitJournal data model, GitHub sync).
-React 19 + TS strict + Vite in a Capacitor 8 shell; git via a Kotlin JGit plugin.
+React 19 + TS strict + Vite in a Capacitor 8 shell; git via a Java JGit plugin.
+
+**Layout = Obsidian mobile, by explicit user request** (see screenshots in the
+first session): left sidebar overlay with Files/Search/Tags/Properties/Bookmarks
+views + view-switcher pill + vault bar (name → vault menu, sync columns, gear);
+note-first workspace with sidebar toggle top-left and edit-toggle + ⋮ menu
+top-right; floating bottom pill (back/forward/quick-open/new/tabs/palette).
+Navigation is per-tab history with back AND forward (`src/state/nav.ts`).
 
 ## Commands
 
 - `npm run dev` — browser dev (mock git engine + demo vault auto-loads after fake onboarding)
-- `npm test` — vitest (domain layer tests in `src/lib/lib.test.ts`)
+- `npm test` — vitest (domain layer: `src/lib/lib.test.ts`, `src/state/nav.test.ts`)
+- `npm run test:visual` — Playwright screenshot + gesture suite (`tests/visual/`);
+  baselines in `tests/visual/__screenshots__` are committed. After an intentional
+  UI change run `npm run test:visual:update` and eyeball the changed PNGs.
 - `npm run build` — `tsc --noEmit` then vite build (keep it green)
 - `npm run sync` — build + `cap sync android`
 - Android build: `cd android && JAVA_HOME=$HOME/.local/java/jdk-21.0.11+10/Contents/Home ./gradlew assembleDebug`
@@ -45,3 +55,11 @@ sync indicator (`.sync-columns`) that glows ember while syncing.
   two places expecting parallelism.
 - Task checkbox toggling maps rendered-line → source-line via node positions;
   frontmatter offset is added in `NoteScreen` (`fmLineOffset`).
+- Touch gestures: pure math in `src/lib/gesture.ts` (unit-tested), DOM layer in
+  `src/ui/workspace/DrawerGestures.tsx`. The sidebar is ALWAYS mounted —
+  `data-open` drives CSS transitions, drags scrub the transform inline. Don't
+  go back to conditional mounting; the gesture layer depends on the element
+  existing.
+- Edit screen: the format toolbar renders only while the editor has focus
+  (`nav.editorFocused`), and the bottom pill hides then — they share the same
+  bottom space and used to collide.

@@ -1,13 +1,15 @@
 {
   "name": "basalt",
   "version": "0.1.0",
-  "description": "Basalt — a beautiful Android markdown vault that syncs with GitHub",
+  "description": "Basalt \u2014 a beautiful Android markdown vault that syncs with GitHub",
   "scripts": {
     "test": "vitest run",
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "sync": "npm run build && npx cap sync android"
+    "sync": "npm run build && npx cap sync android",
+    "test:visual": "playwright test",
+    "test:visual:update": "playwright test --update-snapshots"
   },
   "keywords": [],
   "author": "",
@@ -55,6 +57,7 @@
   },
   "devDependencies": {
     "@capacitor/cli": "^8.4.1",
+    "@playwright/test": "^1.61.1",
     "@types/hast": "^3.0.4",
     "@types/mdast": "^4.0.4",
     "@types/react": "^19.2.17",

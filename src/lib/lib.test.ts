@@ -6,6 +6,8 @@ import { extractTags } from './tags';
 import { buildTree, walkFiles } from './tree';
 import { dirname, extname, isHiddenPath, joinPath, normalizePath, noteTitle } from './paths';
 import { LinkResolver, parseWikilinks, wikilinkDisplayText } from './wikilinks';
+import { stripInlineMarkdown } from './plaintext';
+import { claimAxis, drawerProgress, pullTriggered, settleOpen, velocityX } from './gesture';
 
 describe('paths', () => {
   it('normalizes separators and dots', () => {
@@ -184,5 +186,76 @@ describe('buildTree', () => {
     expect(tree.children.map((c) => c.name)).toEqual(['drafts', 'a.md']);
     const drafts = tree.children.find((c) => c.name === 'drafts');
     expect(drafts?.kind === 'folder' && drafts.children.length).toBe(0);
+  });
+});
+
+describe('stripInlineMarkdown', () => {
+  it('keeps words, drops syntax', () => {
+    const md = '# Basalt\nA **beautiful** *vault* with `code` and ==marks==.';
+    expect(stripInlineMarkdown(md)).toBe('Basalt A beautiful vault with code and marks.');
+  });
+
+  it('resolves links to their labels', () => {
+    expect(stripInlineMarkdown('See [[Projects/Basalt|the app]] and [[Welcome]].')).toBe(
+      'See the app and Welcome.',
+    );
+    expect(stripInlineMarkdown('Embed ![[Projects/Basalt#Why]] here')).toBe(
+      'Embed Basalt#Why here',
+    );
+    expect(stripInlineMarkdown('[docs](https://example.com) and ![alt](img.png)')).toBe(
+      'docs and alt',
+    );
+  });
+
+  it('drops comments, block ids, list and quote markers', () => {
+    const md = '> quoted\n- [ ] task %%secret%%\n1. first ^block-id\n---';
+    const out = stripInlineMarkdown(md);
+    expect(out).toContain('quoted');
+    expect(out).toContain('task');
+    expect(out).toContain('first');
+    expect(out).not.toContain('secret');
+    expect(out).not.toContain('^block-id');
+    expect(out).not.toContain('- [ ]');
+  });
+});
+
+describe('gesture math', () => {
+  it('claims an axis only past the slop, with horizontal bias', () => {
+    expect(claimAxis(5, 5)).toBeNull();
+    expect(claimAxis(20, 5)).toBe('x');
+    expect(claimAxis(14, 12)).toBeNull(); // ambiguous diagonal stays undecided
+    expect(claimAxis(5, 20)).toBe('y');
+    expect(claimAxis(-20, 4)).toBe('x'); // sign-agnostic
+  });
+
+  it('maps finger travel to drawer progress from either anchor', () => {
+    expect(drawerProgress(false, 0, 320)).toBe(0);
+    expect(drawerProgress(false, 160, 320)).toBe(0.5);
+    expect(drawerProgress(false, 999, 320)).toBe(1);
+    expect(drawerProgress(true, -160, 320)).toBe(0.5);
+    expect(drawerProgress(true, 80, 320)).toBe(1); // can't over-open
+  });
+
+  it('settles on position unless a fling decides it', () => {
+    expect(settleOpen(0.6, 0)).toBe(true);
+    expect(settleOpen(0.4, 0)).toBe(false);
+    expect(settleOpen(0.2, 0.5)).toBe(true); // fling right
+    expect(settleOpen(0.9, -0.5)).toBe(false); // fling left
+  });
+
+  it('measures velocity over the trailing window', () => {
+    const samples = [
+      { t: 0, x: 0, y: 0 },
+      { t: 50, x: 10, y: 0 },
+      { t: 100, x: 40, y: 0 },
+    ];
+    expect(velocityX(samples)).toBeCloseTo(0.4);
+    expect(velocityX([{ t: 0, x: 0, y: 0 }])).toBe(0);
+  });
+
+  it('triggers pull-down only for a firmly vertical drag', () => {
+    expect(pullTriggered(0, 100)).toBe(true);
+    expect(pullTriggered(0, 60)).toBe(false);
+    expect(pullTriggered(120, 100)).toBe(false); // diagonal → drawer's business
   });
 });
