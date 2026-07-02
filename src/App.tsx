@@ -1,12 +1,16 @@
 import { App as CapApp } from '@capacitor/app';
 import { Keyboard } from '@capacitor/keyboard';
 import { StatusBar, Style } from '@capacitor/status-bar';
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { getGitEngine, isNativePlatform, VAULT_DIR } from '@/engine';
 import { syncService, useSettings, vaultService } from '@/services';
 import { currentScreen, useNav } from '@/state/nav';
 import { BrowserScreen } from '@/ui/screens/BrowserScreen';
-import { EditScreen } from '@/ui/screens/EditScreen';
+
+// CodeMirror is the heaviest chunk — load it only when editing starts (P-4).
+const EditScreen = lazy(() =>
+  import('@/ui/screens/EditScreen').then((m) => ({ default: m.EditScreen })),
+);
 import { HistoryScreen } from '@/ui/screens/HistoryScreen';
 import { NoteScreen } from '@/ui/screens/NoteScreen';
 import { OnboardingScreen } from '@/ui/screens/OnboardingScreen';
@@ -114,7 +118,9 @@ export function App() {
     case 'edit':
       return (
         <div className="shell">
-          <EditScreen key={screen.path} path={screen.path} />
+          <Suspense fallback={<div className="screen" />}>
+            <EditScreen key={screen.path} path={screen.path} />
+          </Suspense>
         </div>
       );
     case 'search':
