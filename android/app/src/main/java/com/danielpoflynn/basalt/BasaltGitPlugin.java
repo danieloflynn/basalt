@@ -38,7 +38,9 @@ import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
@@ -285,7 +287,7 @@ public class BasaltGitPlugin extends Plugin {
         run(call, () -> {
             JSObject contents = new JSObject();
             String rootCanonical = dir.getCanonicalPath();
-            List<String> wanted = paths == null ? List.of() : paths.toList();
+            List<String> wanted = paths == null ? Collections.emptyList() : paths.toList();
             for (Object p : wanted) {
                 File f = new File(dir, String.valueOf(p));
                 if (!f.getCanonicalPath().startsWith(rootCanonical)) continue; // traversal guard
@@ -310,7 +312,7 @@ public class BasaltGitPlugin extends Plugin {
             try (Git git = Git.open(dir)) {
                 Status st = git.status().call();
                 JSArray dirty = new JSArray();
-                for (Collection<String> group : List.of(
+                for (Collection<String> group : Arrays.asList(
                         st.getAdded(), st.getChanged(), st.getRemoved(),
                         st.getMissing(), st.getModified(), st.getUntracked(),
                         st.getConflicting())) {
