@@ -41,6 +41,9 @@ interface BasaltGitPlugin {
   }): Promise<MergeOutcome>;
   push(o: { dir: string }): Promise<PushOutcome>;
   log(o: { dir: string; limit?: number; path?: string }): Promise<{ commits: CommitInfo[] }>;
+  fileAtCommit(o: { dir: string; oid: string; path: string }): Promise<{ content: string | null }>;
+  openFile(o: { dir: string; path: string }): Promise<void>;
+  consumePendingShares(): Promise<{ items: { text: string; subject?: string }[] }>;
   addListener(
     eventName: 'progress',
     cb: (e: GitProgress) => void,
@@ -48,6 +51,16 @@ interface BasaltGitPlugin {
 }
 
 const BasaltGit = registerPlugin<BasaltGitPlugin>('BasaltGit');
+
+/** Open a vault file in an external Android app (PDFs etc.). */
+export function nativeOpenFile(dir: string, path: string): Promise<void> {
+  return BasaltGit.openFile({ dir, path });
+}
+
+/** Drain text shared into the app via the Android share sheet. */
+export async function nativeConsumePendingShares(): Promise<{ text: string; subject?: string }[]> {
+  return (await BasaltGit.consumePendingShares()).items;
+}
 
 export class NativeGitEngine implements GitEngine {
   async setCredentials(opts: { username: string; token: string }): Promise<void> {
@@ -114,6 +127,10 @@ export class NativeGitEngine implements GitEngine {
 
   async log(opts: { dir: string; limit?: number; path?: string }): Promise<CommitInfo[]> {
     return (await BasaltGit.log(opts)).commits;
+  }
+
+  async fileAtCommit(opts: { dir: string; oid: string; path: string }): Promise<string | null> {
+    return (await BasaltGit.fileAtCommit(opts)).content;
   }
 
   onProgress(cb: (p: GitProgress) => void): () => void {

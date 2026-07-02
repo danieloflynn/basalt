@@ -1,7 +1,8 @@
 import type { Element, ElementContent, Root, Text } from 'hast';
 import { visit } from 'unist-util-visit';
+import { slugifyHeading } from '@/lib/outline';
 
-const CALLOUT_PATTERN = /^\[!([a-zA-Z]+)\][+-]?\s?/;
+const CALLOUT_PATTERN = /^\[!([a-zA-Z]+)\]([+-])?\s?/;
 
 /**
  * Obsidian callouts: a blockquote whose first paragraph starts with [!kind]
@@ -20,6 +21,7 @@ export function rehypeCallouts() {
       if (!match) return;
 
       const kind = match[1].toLowerCase();
+      const fold = match[2]; // '-' folded, '+' expanded, undefined = plain
       firstText.value = firstText.value.slice(match[0].length);
 
       // Title = remainder of the first line; body = everything else.
@@ -33,9 +35,10 @@ export function rehypeCallouts() {
       }
       const title = titleText.trim() || kind.charAt(0).toUpperCase() + kind.slice(1);
 
+      const foldable = fold === '-' || fold === '+';
       const head: Element = {
         type: 'element',
-        tagName: 'div',
+        tagName: foldable ? 'summary' : 'div',
         properties: { className: ['callout__head'] },
         children: [{ type: 'text', value: title } satisfies Text],
       };
@@ -48,11 +51,83 @@ export function rehypeCallouts() {
         ) as ElementContent[],
       };
 
-      node.tagName = 'div';
-      node.properties = { className: ['callout'], 'data-kind': kind };
+      node.tagName = foldable ? 'details' : 'div';
+      node.properties = {
+        className: ['callout'],
+        'data-kind': kind,
+        ...(fold === '+' ? { open: true } : {}),
+      };
       node.children = [head, body];
     });
   };
+}
+
+/** Give headings stable ids so [[Note#Heading]] can scroll to them. */
+export function rehypeHeadingAnchors() {
+  return (tree: Root) => {
+    visit(tree, 'element', (node: Element) => {
+      if (!/^h[1-6]$/.test(node.tagName)) return;
+      const text = collectText(node);
+      if (text) node.properties = { ...node.properties, id: slugifyHeading(text) };
+    });
+  };
+}
+
+function collectText(node: Element): string {
+  let out = '';
+  visit(node, 'text', (t: Text) => {
+    out += t.value;
+  });
+  return out;
+}
+
+/**
+ * Rewrites remark-math output and mermaid code fences into custom elements
+ * that rehype-react maps to lazy-loaded components:
+ *   code.math-inline          -> <math-inline>tex</math-inline>
+ *   pre > code.math-display   -> <math-display>tex</math-display>
+ *   pre > code.language-mermaid -> <mermaid-block>src</mermaid-block>
+ */
+export function rehypeSpecialBlocks() {
+  return (tree: Root) => {
+    visit(tree, 'element', (node: Element, index, parent) => {
+      if (index === undefined || !parent) return;
+      const target = codeChildOrSelf(node);
+      if (!target) return;
+      const classes = classList(target);
+      let tagName: string | null = null;
+      if (classes.includes('language-mermaid')) tagName = 'mermaid-block';
+      else if (classes.includes('math-display')) tagName = 'math-display';
+      else if (classes.includes('math-inline')) tagName = 'math-inline';
+      if (!tagName) return;
+      // Inline math must stay inline: only accept bare <code> for math-inline.
+      if (tagName === 'math-inline' && node.tagName === 'pre') tagName = 'math-display';
+
+      const replacement: Element = {
+        type: 'element',
+        tagName,
+        properties: {},
+        children: [{ type: 'text', value: collectText(target) } satisfies Text],
+      };
+      (parent as Element).children[index] = replacement;
+    });
+  };
+}
+
+function codeChildOrSelf(node: Element): Element | null {
+  if (node.tagName === 'code') return node;
+  if (node.tagName === 'pre') {
+    const code = node.children.find(
+      (c): c is Element => c.type === 'element' && c.tagName === 'code',
+    );
+    return code ?? null;
+  }
+  return null;
+}
+
+function classList(node: Element): string[] {
+  const cls = node.properties?.className;
+  return Array.isArray(cls) ? cls.map(String) : typeof cls === 'string' ? cls.split(' ') : [];
 }
 
 function paraIsEmpty(p: Element): boolean {

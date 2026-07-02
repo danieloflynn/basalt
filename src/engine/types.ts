@@ -74,8 +74,16 @@ export interface GitEngine {
   merge(opts: { dir: string; conflictSuffix: string; author: Author }): Promise<MergeOutcome>;
   push(opts: { dir: string }): Promise<PushOutcome>;
   log(opts: { dir: string; limit?: number; path?: string }): Promise<CommitInfo[]>;
+  /** Content of a file as of a given commit, or null if absent there (D-4). */
+  fileAtCommit(opts: { dir: string; oid: string; path: string }): Promise<string | null>;
 
   onProgress(cb: (p: GitProgress) => void): () => void;
+}
+
+/** Text shared into the app from other Android apps (share sheet). */
+export interface SharedItem {
+  text: string;
+  subject?: string;
 }
 
 export interface VaultFileInfo {

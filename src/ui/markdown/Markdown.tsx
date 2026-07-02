@@ -1,20 +1,31 @@
 import { Browser } from '@capacitor/browser';
-import type { ComponentProps, ReactNode } from 'react';
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import type { ComponentProps, ComponentType, ReactNode } from 'react';
+import { createContext, lazy, Suspense, useContext, useEffect, useMemo, useState } from 'react';
 import { Fragment, jsx, jsxs } from 'react/jsx-runtime';
 import rehypeHighlight from 'rehype-highlight';
 import rehypeReact from 'rehype-react';
 import remarkFrontmatter from 'remark-frontmatter';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
 import remarkParse from 'remark-parse';
 import remarkRehype from 'remark-rehype';
 import { unified } from 'unified';
-import { isMarkdownPath } from '@/lib/paths';
+import { extractBlock, removeComments, slugifyHeading } from '@/lib/outline';
+import { isAudioPath, isMarkdownPath, isPdfPath, isVideoPath } from '@/lib/paths';
+import { openFileExternally } from '@/engine';
 import { vaultService } from '@/services';
 import { openNote, useNav } from '@/state/nav';
-import { IconCheck, IconImage } from '@/ui/icons';
-import { rehypeCallouts, rehypeTasks } from './rehypePlugins';
+import { IconCheck, IconImage, IconNote } from '@/ui/icons';
+import {
+  rehypeCallouts,
+  rehypeHeadingAnchors,
+  rehypeSpecialBlocks,
+  rehypeTasks,
+} from './rehypePlugins';
 import { remarkDropFrontmatter, remarkObsidian } from './remarkObsidian';
+
+const MathBlock = lazy(() => import('./MathBlock'));
+const MermaidBlock = lazy(() => import('./MermaidBlock'));
 
 interface MarkdownContextValue {
   /** Vault path of the note being rendered (link resolution origin). */
@@ -37,10 +48,16 @@ function SmartAnchor(props: ComponentProps<'a'>) {
   const target = dataset['data-target'] as string | undefined;
   const tag = dataset['data-tag'] as string | undefined;
   const embed = dataset['data-embed'] as string | undefined;
+  const media = dataset['data-media'] as string | undefined;
   const heading = dataset['data-heading'] as string | undefined;
+  const block = dataset['data-block'] as string | undefined;
 
-  if (embed && target) {
-    return <NoteEmbed target={target} heading={heading} />;
+  if (media && target) {
+    return <MediaEmbed target={target} />;
+  }
+
+  if (embed && target !== undefined) {
+    return <NoteEmbed target={target} heading={heading} block={block} />;
   }
 
   if (tag) {
@@ -50,7 +67,7 @@ function SmartAnchor(props: ComponentProps<'a'>) {
         className="tag"
         onClick={(e) => {
           e.preventDefault();
-          useNav.getState().push({ name: 'search', initialQuery: `#${tag}` });
+          useNav.getState().seedSearch(`tag:${tag}`);
         }}
       >
         {props.children}
@@ -66,7 +83,12 @@ function SmartAnchor(props: ComponentProps<'a'>) {
         className={resolved ? 'wikilink' : 'wikilink wikilink--unresolved'}
         onClick={(e) => {
           e.preventDefault();
-          if (resolved && isMarkdownPath(resolved)) openNote(resolved);
+          if (!resolved || !isMarkdownPath(resolved)) return;
+          if (resolved === ctx.path && heading) {
+            scrollToHeading(heading);
+          } else {
+            openNote(resolved, heading);
+          }
         }}
       >
         {props.children}
@@ -95,6 +117,11 @@ function SmartAnchor(props: ComponentProps<'a'>) {
   );
 }
 
+export function scrollToHeading(heading: string): void {
+  const el = document.getElementById(slugifyHeading(heading));
+  el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 function anchorProps(props: ComponentProps<'a'>): ComponentProps<'a'> {
   const { children: _children, ...rest } = props;
   return { ...rest, href: props.href ?? '#' };
@@ -108,6 +135,17 @@ function VaultImage(props: ComponentProps<'img'>) {
   const remote = /^https?:\/\//i.test(String(raw));
   const [src, setSrc] = useState<string | null>(remote ? String(raw) : null);
   const [failed, setFailed] = useState(false);
+
+  // Obsidian's `![alt|300](url)` sizing for standard image syntax.
+  let alt = props.alt ?? '';
+  let width = props.width;
+  let height = props.height;
+  const sizeInAlt = /^(.*)\|(\d+)(?:x(\d+))?$/.exec(alt);
+  if (sizeInAlt) {
+    alt = sizeInAlt[1];
+    width = Number(sizeInAlt[2]);
+    if (sizeInAlt[3]) height = Number(sizeInAlt[3]);
+  }
 
   useEffect(() => {
     if (remote) return;
@@ -138,7 +176,69 @@ function VaultImage(props: ComponentProps<'img'>) {
     );
   }
   if (!src) return <span className="embed" style={{ display: 'block', minHeight: 40 }} />;
-  return <img src={src} alt={props.alt ?? ''} loading="lazy" onError={() => setFailed(true)} />;
+  return (
+    <img src={src} alt={alt} width={width} height={height} loading="lazy" onError={() => setFailed(true)} />
+  );
+}
+
+/** ![[file.mp3]] / ![[clip.mp4]] inline players; ![[doc.pdf]] opens externally. */
+function MediaEmbed({ target }: { target: string }) {
+  const ctx = useContext(MarkdownContext);
+  const resolved = vaultService.resolveLink(target, ctx.path);
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!resolved) return;
+    vaultService.fileUrl(resolved).then((u) => {
+      if (!cancelled) setUrl(u);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [resolved]);
+
+  if (!resolved) {
+    return (
+      <span className="embed embed--broken" style={{ display: 'block' }}>
+        Missing file: {target}
+      </span>
+    );
+  }
+
+  if (isAudioPath(resolved)) {
+    return url ? (
+      <audio controls src={url} style={{ width: '100%', display: 'block' }} />
+    ) : (
+      <span className="embed" style={{ display: 'block', minHeight: 40 }} />
+    );
+  }
+  if (isVideoPath(resolved)) {
+    return url ? (
+      <video controls src={url} playsInline style={{ width: '100%', display: 'block', borderRadius: 8 }} />
+    ) : (
+      <span className="embed" style={{ display: 'block', minHeight: 40 }} />
+    );
+  }
+  if (isPdfPath(resolved)) {
+    return (
+      <button
+        type="button"
+        className="embed"
+        style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left' }}
+        onClick={() => void openFileExternally(resolved)}
+      >
+        <IconNote size={18} />
+        <span>
+          <span style={{ display: 'block', fontWeight: 600 }}>{target}</span>
+          <span style={{ display: 'block', fontSize: '0.8em', color: 'var(--text-faint)' }}>
+            Open PDF
+          </span>
+        </span>
+      </button>
+    );
+  }
+  return null;
 }
 
 function TaskBox(props: ComponentProps<'button'>) {
@@ -160,8 +260,8 @@ function TaskBox(props: ComponentProps<'button'>) {
   );
 }
 
-/** ![[Note]] transclusion — renders the target note inline, one section if a heading is given. */
-function NoteEmbed({ target, heading }: { target: string; heading?: string }) {
+/** ![[Note]] transclusion — whole note, one #section, or one ^block. */
+function NoteEmbed({ target, heading, block }: { target: string; heading?: string; block?: string }) {
   const ctx = useContext(MarkdownContext);
   const resolved = vaultService.resolveLink(target, ctx.path);
   const [text, setText] = useState<string | null>(null);
@@ -197,12 +297,17 @@ function NoteEmbed({ target, heading }: { target: string; heading?: string }) {
     return <span className="embed" style={{ display: 'block', minHeight: 40 }} />;
   }
 
-  const section = heading ? extractSection(text, heading) : text;
+  const section = block
+    ? (extractBlock(text, block) ?? text)
+    : heading
+      ? extractSection(text, heading)
+      : text;
+  const label = heading ? ` › ${heading}` : block ? ` › ^${block}` : '';
   return (
     <span className="embed" style={{ display: 'block' }}>
       <span className="embed__title" style={{ display: 'block' }}>
-        {target}
-        {heading ? ` › ${heading}` : ''}
+        {target || 'This note'}
+        {label}
       </span>
       <Markdown source={section} path={resolved} depth={ctx.depth + 1} />
     </span>
@@ -232,25 +337,57 @@ export function extractSection(source: string, heading: string): string {
 // Pipeline
 // ---------------------------------------------------------------------------
 
+function MathInline({ children }: { children?: ReactNode }) {
+  return (
+    <Suspense fallback={<code>{children}</code>}>
+      <MathBlock tex={String(children ?? '')} display={false} />
+    </Suspense>
+  );
+}
+
+function MathDisplay({ children }: { children?: ReactNode }) {
+  return (
+    <Suspense fallback={<code>{children}</code>}>
+      <MathBlock tex={String(children ?? '')} display />
+    </Suspense>
+  );
+}
+
+function MermaidTag({ children }: { children?: ReactNode }) {
+  return (
+    <Suspense fallback={<span className="embed" style={{ display: 'block', minHeight: 60 }} />}>
+      <MermaidBlock source={String(children ?? '')} />
+    </Suspense>
+  );
+}
+
+const components = {
+  a: SmartAnchor,
+  img: VaultImage,
+  button: TaskBox,
+  'math-inline': MathInline,
+  'math-display': MathDisplay,
+  'mermaid-block': MermaidTag,
+} as unknown as Record<string, ComponentType<Record<string, unknown>>>;
+
 const processor = unified()
   .use(remarkParse)
   .use(remarkGfm)
+  .use(remarkMath, { singleDollarTextMath: true })
   .use(remarkFrontmatter, ['yaml'])
   .use(remarkDropFrontmatter)
   .use(remarkObsidian)
   .use(remarkRehype)
   .use(rehypeTasks)
   .use(rehypeCallouts)
+  .use(rehypeHeadingAnchors)
+  .use(rehypeSpecialBlocks)
   .use(rehypeHighlight, { detect: false })
   .use(rehypeReact, {
     Fragment,
     jsx,
     jsxs,
-    components: {
-      a: SmartAnchor,
-      img: VaultImage,
-      button: TaskBox,
-    },
+    components: components as never,
   });
 
 export interface MarkdownProps {
@@ -264,7 +401,7 @@ export function Markdown({ source, path, depth = 0, onToggleTask }: MarkdownProp
   const ctx = useMemo(() => ({ path, depth, onToggleTask }), [path, depth, onToggleTask]);
   const content = useMemo<ReactNode>(() => {
     try {
-      return processor.processSync(source).result;
+      return processor.processSync(removeComments(source)).result;
     } catch {
       return <pre>{source}</pre>;
     }

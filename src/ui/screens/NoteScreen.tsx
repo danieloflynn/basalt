@@ -3,13 +3,17 @@ import { parseFrontmatter } from '@/lib/frontmatter';
 import { noteTitle } from '@/lib/paths';
 import { vaultService } from '@/services';
 import { useNav } from '@/state/nav';
-import { IconBack, IconHistory, IconPencil } from '@/ui/icons';
-import { Markdown } from '@/ui/markdown/Markdown';
+import { IconDots, IconPencil } from '@/ui/icons';
+import { Markdown, scrollToHeading } from '@/ui/markdown/Markdown';
+import { NoteMenu } from '@/ui/components/NoteMenu';
+import { SidebarToggle } from '@/ui/workspace/chrome';
 
-export function NoteScreen({ path }: { path: string }) {
+/** Reading view — Obsidian layout: sidebar toggle left, edit + menu right, inline title. */
+export function NoteScreen({ path, heading }: { path: string; heading?: string }) {
   const nav = useNav();
   const [text, setText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -18,7 +22,11 @@ export function NoteScreen({ path }: { path: string }) {
     vaultService
       .readNote(path)
       .then((t) => {
-        if (!cancelled) setText(t);
+        if (cancelled) return;
+        setText(t);
+        if (heading) {
+          requestAnimationFrame(() => requestAnimationFrame(() => scrollToHeading(heading)));
+        }
       })
       .catch((e) => {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
@@ -26,7 +34,7 @@ export function NoteScreen({ path }: { path: string }) {
     return () => {
       cancelled = true;
     };
-  }, [path]);
+  }, [path, heading]);
 
   const toggleTask = useCallback(
     (line: number) => {
@@ -40,31 +48,25 @@ export function NoteScreen({ path }: { path: string }) {
   );
 
   const fm = text !== null ? parseFrontmatter(text) : null;
-  // Line positions in the rendered body are offset by the frontmatter block.
-  const fmLineOffset =
-    fm?.raw != null ? fm.raw.split('\n').length + 2 : 0;
+  const fmLineOffset = fm?.raw != null ? fm.raw.split('\n').length + 2 : 0;
 
   return (
     <div className="screen">
-      <header className="topbar">
-        <button className="iconbtn" aria-label="Back" onClick={() => nav.back()}>
-          <IconBack />
-        </button>
-        <h1 className="topbar__title">{noteTitle(path)}</h1>
-        <button
-          className="iconbtn"
-          aria-label="Note history"
-          onClick={() => nav.push({ name: 'history', path })}
-        >
-          <IconHistory />
-        </button>
-        <button
-          className="iconbtn iconbtn--accent"
-          aria-label="Edit note"
-          onClick={() => nav.push({ name: 'edit', path })}
-        >
-          <IconPencil />
-        </button>
+      <header className="workspace-top">
+        <SidebarToggle />
+        <span style={{ flex: 1 }} />
+        <div className="workspace-top__group">
+          <button
+            className="iconbtn"
+            aria-label="Edit note"
+            onClick={() => nav.replace({ name: 'edit', path })}
+          >
+            <IconPencil size={20} />
+          </button>
+          <button className="iconbtn" aria-label="Note menu" onClick={() => setMenuOpen(true)}>
+            <IconDots size={20} />
+          </button>
+        </div>
       </header>
 
       <div className="scroll">
@@ -77,6 +79,7 @@ export function NoteScreen({ path }: { path: string }) {
         {error === null && text === null && <div className="state" />}
         {fm !== null && (
           <>
+            <h1 className="inline-title">{noteTitle(path)}</h1>
             {Object.keys(fm.data).length > 0 && <Properties data={fm.data} />}
             <Markdown
               source={fm.body}
@@ -86,24 +89,26 @@ export function NoteScreen({ path }: { path: string }) {
           </>
         )}
       </div>
+
+      {menuOpen && <NoteMenu path={path} onClose={() => setMenuOpen(false)} />}
     </div>
   );
 }
 
 function Properties({ data }: { data: Record<string, unknown> }) {
   return (
-    <details className="props" style={{ margin: '14px var(--pad-screen) 0' }}>
+    <details className="props" style={{ margin: '4px var(--pad-screen) 0' }}>
       <summary>Properties · {Object.keys(data).length}</summary>
       <div className="props__grid">
         {Object.entries(data).map(([key, value]) => (
-          <FragmentRow key={key} k={key} v={value} />
+          <PropRow key={key} k={key} v={value} />
         ))}
       </div>
     </details>
   );
 }
 
-function FragmentRow({ k, v }: { k: string; v: unknown }) {
+function PropRow({ k, v }: { k: string; v: unknown }) {
   return (
     <>
       <span className="props__key">{k}</span>

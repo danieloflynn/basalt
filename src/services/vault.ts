@@ -2,10 +2,11 @@ import MiniSearch from 'minisearch';
 import { create } from 'zustand';
 import { getVaultFS, type VaultFileInfo } from '@/engine';
 import { parseFrontmatter } from '@/lib/frontmatter';
-import { extractTags } from '@/lib/tags';
+import { extractOutline, type HeadingInfo } from '@/lib/outline';
+import { extractTags, stripCode } from '@/lib/tags';
 import { buildTree, type TreeFolder } from '@/lib/tree';
 import { isHiddenPath, isMarkdownPath, joinPath, noteTitle } from '@/lib/paths';
-import { LinkResolver } from '@/lib/wikilinks';
+import { LinkResolver, parseWikilinks } from '@/lib/wikilinks';
 
 export interface NoteMeta {
   path: string;
@@ -22,12 +23,20 @@ export interface SearchHit {
   score: number;
 }
 
+export interface Backlink {
+  path: string;
+  title: string;
+  /** Source line(s) around the mention. */
+  context: string;
+}
+
 interface VaultState {
   ready: boolean;
   files: VaultFileInfo[];
   tree: TreeFolder;
   notes: Map<string, NoteMeta>;
   recents: string[];
+  bookmarks: string[];
   indexVersion: number;
 }
 
@@ -37,8 +46,11 @@ export const useVault = create<VaultState>(() => ({
   tree: buildTree([]),
   notes: new Map(),
   recents: [],
+  bookmarks: [],
   indexVersion: 0,
 }));
+
+const BOOKMARKS_FILE = '.obsidian/bookmarks.json';
 
 const EXCERPT_RADIUS = 60;
 
@@ -48,12 +60,19 @@ const EXCERPT_RADIUS = 60;
  * files remain the source of truth (TD-22).
  */
 export class VaultService {
-  private fs = getVaultFS();
   private resolver = new LinkResolver([]);
   private contents = new Map<string, string>();
   private search = this.newSearchIndex();
+  /** Resolved outgoing links per note; backlinks are the inverse. */
+  private outgoing = new Map<string, Set<string>>();
+  private backlinks = new Map<string, Set<string>>();
   /** Called after any local content change; wired to SyncService in services/index.ts. */
   onEdited: () => void = () => {};
+
+  /** Live accessor so vault switching (multi-vault) swaps the FS underneath us. */
+  private get fs() {
+    return getVaultFS();
+  }
 
   private newSearchIndex(): MiniSearch {
     return new MiniSearch({
@@ -88,14 +107,17 @@ export class VaultService {
       docs.push(this.searchDoc(meta, text));
     }
     this.search.addAll(docs);
+    this.rebuildLinkGraph();
 
     useVault.setState((s) => ({
       ready: true,
       files,
       tree: buildTree(files.map((f) => f.path)),
       notes,
+      bookmarks: [],
       indexVersion: s.indexVersion + 1,
     }));
+    await this.loadBookmarks();
   }
 
   private noteMeta(path: string, text: string, mtimeMs: number): NoteMeta {
@@ -152,6 +174,7 @@ export class VaultService {
     const known = useVault.getState().notes.has(path);
     if (known) this.search.replace(this.searchDoc(meta, text));
     else this.search.add(this.searchDoc(meta, text));
+    this.setOutgoing(path, text);
     useVault.setState((s) => {
       const notes = new Map(s.notes).set(path, meta);
       return { notes, indexVersion: s.indexVersion + 1 };
@@ -244,6 +267,7 @@ export class VaultService {
   /** Re-list files and rebuild the tree after create/rename/delete, then queue a sync. */
   private async afterStructuralChange(): Promise<void> {
     const files = await this.fs.list();
+    this.rebuildLinkGraph();
     useVault.setState((s) => ({
       files,
       tree: buildTree(files.map((f) => f.path)),
@@ -251,6 +275,211 @@ export class VaultService {
       indexVersion: s.indexVersion + 1,
     }));
     this.onEdited();
+  }
+
+  // ------------------------------------------------------------------
+  // Link graph (backlinks, graph view)
+  // ------------------------------------------------------------------
+
+  private linksIn(path: string, text: string): Set<string> {
+    const out = new Set<string>();
+    const body = stripCode(parseFrontmatter(text).body);
+    for (const link of parseWikilinks(body)) {
+      const resolved = this.resolver.resolve(link.target, path);
+      if (resolved && resolved !== path && isMarkdownPath(resolved)) out.add(resolved);
+    }
+    for (const m of body.matchAll(/(^|[^!])\[[^\]]*\]\(([^)\s]+)\)/g)) {
+      const href = m[2];
+      if (/^[a-z][a-z0-9+.-]*:/i.test(href)) continue;
+      const resolved = this.resolver.resolve(decodeURIComponent(href), path);
+      if (resolved && resolved !== path && isMarkdownPath(resolved)) out.add(resolved);
+    }
+    return out;
+  }
+
+  private setOutgoing(path: string, text: string): void {
+    const before = this.outgoing.get(path) ?? new Set<string>();
+    const after = this.linksIn(path, text);
+    this.outgoing.set(path, after);
+    for (const t of before) {
+      if (!after.has(t)) this.backlinks.get(t)?.delete(path);
+    }
+    for (const t of after) {
+      if (!this.backlinks.has(t)) this.backlinks.set(t, new Set());
+      this.backlinks.get(t)!.add(path);
+    }
+  }
+
+  private rebuildLinkGraph(): void {
+    this.outgoing.clear();
+    this.backlinks.clear();
+    for (const [path, text] of this.contents) {
+      if (!isMarkdownPath(path) || isHiddenPath(path)) continue;
+      this.setOutgoing(path, text);
+    }
+  }
+
+  backlinksOf(path: string): Backlink[] {
+    const sources = this.backlinks.get(path);
+    if (!sources) return [];
+    const title = noteTitle(path).toLowerCase();
+    return [...sources].sort().map((src) => {
+      const text = this.contents.get(src) ?? '';
+      const line =
+        text
+          .split('\n')
+          .find((l) => l.toLowerCase().includes(`[[${title}`) || l.toLowerCase().includes(title)) ??
+        '';
+      return { path: src, title: noteTitle(src), context: line.trim().slice(0, 160) };
+    });
+  }
+
+  outgoingOf(path: string): string[] {
+    return [...(this.outgoing.get(path) ?? [])];
+  }
+
+  /** Full resolved link graph — nodes are note paths (for the graph view). */
+  linkGraph(): { nodes: string[]; edges: [string, string][] } {
+    const nodes = [...useVault.getState().notes.keys()];
+    const edges: [string, string][] = [];
+    for (const [from, targets] of this.outgoing) {
+      for (const to of targets) edges.push([from, to]);
+    }
+    return { nodes, edges };
+  }
+
+  outlineOf(path: string): HeadingInfo[] {
+    const text = this.contents.get(path);
+    return text ? extractOutline(parseFrontmatter(text).body) : [];
+  }
+
+  /** Frontmatter property key -> note count, for the All Properties sidebar view. */
+  propertyCounts(): { key: string; count: number }[] {
+    const counts = new Map<string, number>();
+    for (const [path, text] of this.contents) {
+      if (!isMarkdownPath(path) || isHiddenPath(path)) continue;
+      for (const key of Object.keys(parseFrontmatter(text).data)) {
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+      }
+    }
+    return [...counts.entries()]
+      .map(([key, count]) => ({ key, count }))
+      .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
+  }
+
+  notesWithProperty(key: string): NoteMeta[] {
+    const { notes } = useVault.getState();
+    const out: NoteMeta[] = [];
+    for (const [path, text] of this.contents) {
+      if (!notes.has(path)) continue;
+      if (key in parseFrontmatter(text).data) out.push(notes.get(path)!);
+    }
+    return out.sort((a, b) => a.title.localeCompare(b.title));
+  }
+
+  /** Tag -> note count, sorted by count. */
+  tagCounts(): { tag: string; count: number }[] {
+    const counts = new Map<string, { tag: string; count: number }>();
+    for (const meta of useVault.getState().notes.values()) {
+      for (const tag of meta.tags) {
+        const key = tag.toLowerCase();
+        const entry = counts.get(key);
+        if (entry) entry.count++;
+        else counts.set(key, { tag, count: 1 });
+      }
+    }
+    return [...counts.values()].sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
+  }
+
+  // ------------------------------------------------------------------
+  // Bookmarks (.obsidian/bookmarks.json — Obsidian-compatible, synced)
+  // ------------------------------------------------------------------
+
+  private async loadBookmarks(): Promise<void> {
+    try {
+      const raw = await this.fs.read(BOOKMARKS_FILE);
+      const parsed = JSON.parse(raw) as { items?: { type?: string; path?: string }[] };
+      const paths = (parsed.items ?? [])
+        .filter((i) => i.type === 'file' && typeof i.path === 'string')
+        .map((i) => i.path as string);
+      useVault.setState({ bookmarks: paths });
+    } catch {
+      useVault.setState({ bookmarks: [] });
+    }
+  }
+
+  async toggleBookmark(path: string): Promise<void> {
+    const current = useVault.getState().bookmarks;
+    const next = current.includes(path)
+      ? current.filter((p) => p !== path)
+      : [...current, path];
+    useVault.setState({ bookmarks: next });
+    // Preserve any non-file bookmark items Obsidian may have written.
+    let items: unknown[] = [];
+    try {
+      const parsed = JSON.parse(await this.fs.read(BOOKMARKS_FILE)) as { items?: unknown[] };
+      items = (parsed.items ?? []).filter(
+        (i) => (i as { type?: string }).type !== 'file',
+      );
+    } catch {
+      // fresh file
+    }
+    const fileItems = next.map((p) => ({ type: 'file', path: p }));
+    await this.fs.write(BOOKMARKS_FILE, JSON.stringify({ items: [...items, ...fileItems] }, null, 2));
+    this.onEdited();
+  }
+
+  // ------------------------------------------------------------------
+  // Daily notes & templates (reads Obsidian's own config when present)
+  // ------------------------------------------------------------------
+
+  private async readJsonConfig<T>(path: string): Promise<T | null> {
+    try {
+      return JSON.parse(await this.fs.read(path)) as T;
+    } catch {
+      return null;
+    }
+  }
+
+  async dailyNotePath(now = new Date()): Promise<string> {
+    const cfg = await this.readJsonConfig<{ folder?: string; format?: string }>(
+      '.obsidian/daily-notes.json',
+    );
+    const name = formatDate(cfg?.format || 'YYYY-MM-DD', now);
+    return joinPath(cfg?.folder?.trim() ?? '', `${name}.md`);
+  }
+
+  /** Open today's daily note, creating it (from the configured template) if needed. */
+  async openDailyNote(): Promise<string> {
+    const path = await this.dailyNotePath();
+    if (useVault.getState().notes.has(path)) return path;
+    const cfg = await this.readJsonConfig<{ template?: string }>('.obsidian/daily-notes.json');
+    let body = '';
+    if (cfg?.template) {
+      const tpl = this.resolver.resolve(cfg.template, '');
+      if (tpl) body = await this.fs.read(tpl).catch(() => '');
+    }
+    await this.fs.write(path, fillTemplate(body, noteTitle(path)));
+    this.resolver.add(path);
+    await this.afterStructuralChange();
+    return path;
+  }
+
+  /** Template notes available for "new from template" (folder from Obsidian's templates.json). */
+  async listTemplates(): Promise<NoteMeta[]> {
+    const cfg = await this.readJsonConfig<{ folder?: string }>('.obsidian/templates.json');
+    const folder = cfg?.folder?.trim() || 'Templates';
+    const prefix = `${folder}/`;
+    return [...useVault.getState().notes.values()]
+      .filter((n) => n.path.startsWith(prefix))
+      .sort((a, b) => a.title.localeCompare(b.title));
+  }
+
+  async createFromTemplate(templatePath: string, folder = ''): Promise<string> {
+    const body = await this.fs.read(templatePath);
+    const path = await this.createNote(folder, 'Untitled');
+    await this.writeNote(path, fillTemplate(body, noteTitle(path)));
+    return path;
   }
 
   private rebuildNotesMeta(
@@ -275,15 +504,58 @@ export class VaultService {
   // Search (SE-1..4)
   // ------------------------------------------------------------------
 
+  /**
+   * Full-text search with Obsidian-style operators: `tag:x`, `path:sub/`,
+   * `file:name` narrow the results; the remaining words are matched full-text.
+   */
   searchNotes(query: string, limit = 30): SearchHit[] {
     const q = query.trim();
     if (!q) return [];
-    return this.search.search(q).slice(0, limit).map((r) => ({
-      path: String(r.id),
-      title: (r as unknown as { title: string }).title,
-      excerpt: this.excerptFor(String(r.id), q),
-      score: r.score,
-    }));
+
+    const filters: ((meta: NoteMeta) => boolean)[] = [];
+    const words: string[] = [];
+    for (const token of q.split(/\s+/)) {
+      const op = /^(tag|path|file):(.*)$/i.exec(token);
+      if (!op || !op[2]) {
+        words.push(token);
+        continue;
+      }
+      const value = op[2].replace(/^#/, '').toLowerCase();
+      if (op[1].toLowerCase() === 'tag') {
+        filters.push((m) => m.tags.some((t) => t.toLowerCase().startsWith(value)));
+      } else if (op[1].toLowerCase() === 'path') {
+        filters.push((m) => m.path.toLowerCase().includes(value));
+      } else {
+        filters.push((m) => m.title.toLowerCase().includes(value));
+      }
+    }
+
+    const { notes } = useVault.getState();
+    const passes = (path: string): boolean => {
+      const meta = notes.get(path);
+      return meta !== undefined && filters.every((f) => f(meta));
+    };
+
+    const text = words.join(' ');
+    if (!text) {
+      // Operators only: return every matching note, most recent first.
+      return [...notes.values()]
+        .filter((m) => filters.every((f) => f(m)))
+        .sort((a, b) => b.mtimeMs - a.mtimeMs)
+        .slice(0, limit)
+        .map((m) => ({ path: m.path, title: m.title, excerpt: null, score: 0 }));
+    }
+
+    return this.search
+      .search(text)
+      .filter((r) => passes(String(r.id)))
+      .slice(0, limit)
+      .map((r) => ({
+        path: String(r.id),
+        title: (r as unknown as { title: string }).title,
+        excerpt: this.excerptFor(String(r.id), text),
+        score: r.score,
+      }));
   }
 
   /** Title-only matches for the quick-open switcher (SE-3). */
@@ -330,6 +602,36 @@ export class VaultService {
     const end = Math.min(body.length, at + firstTerm.length + EXCERPT_RADIUS);
     return `${start > 0 ? '…' : ''}${body.slice(start, end).replace(/\s+/g, ' ').trim()}${end < body.length ? '…' : ''}`;
   }
+}
+
+/** Subset of moment-style date tokens used by Obsidian's daily notes. */
+export function formatDate(format: string, d: Date): string {
+  const pad = (n: number, w = 2) => String(n).padStart(w, '0');
+  return format.replace(/YYYY|MM|DD|HH|mm|ss/g, (token) => {
+    switch (token) {
+      case 'YYYY':
+        return String(d.getFullYear());
+      case 'MM':
+        return pad(d.getMonth() + 1);
+      case 'DD':
+        return pad(d.getDate());
+      case 'HH':
+        return pad(d.getHours());
+      case 'mm':
+        return pad(d.getMinutes());
+      default:
+        return pad(d.getSeconds());
+    }
+  });
+}
+
+/** Obsidian template variables. */
+function fillTemplate(body: string, title: string): string {
+  const now = new Date();
+  return body
+    .replace(/{{\s*title\s*}}/gi, title)
+    .replace(/{{\s*date\s*}}/gi, formatDate('YYYY-MM-DD', now))
+    .replace(/{{\s*time\s*}}/gi, formatDate('HH:mm', now));
 }
 
 /** Simple subsequence scorer: rewards matches at word starts and contiguity. */

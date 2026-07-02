@@ -1,44 +1,99 @@
 import { useState } from 'react';
-import { getGitEngine, VAULT_DIR } from '@/engine';
-import { syncService, useSettings, useSync } from '@/services';
+import { getGitEngine, setVaultDir } from '@/engine';
+import { syncService, useSettings, useSync, vaultService, type VaultInfo } from '@/services';
 import { useNav } from '@/state/nav';
 import { timeAgo } from '@/ui/components/SyncStatus';
 import { Dialog } from '@/ui/components/Dialog';
-import { IconBack, IconChevronRight, IconGit, IconHistory } from '@/ui/icons';
+import { OnboardingScreen } from '@/ui/screens/OnboardingScreen';
+import { IconBack, IconChevronRight, IconGit, IconHistory, IconPlus } from '@/ui/icons';
 
 export function SettingsScreen() {
   const nav = useNav();
   const { settings, update, reset } = useSettings();
   const { lastSyncAt, pendingCount } = useSync();
-  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+  const [removing, setRemoving] = useState<VaultInfo | null>(null);
   const [editingToken, setEditingToken] = useState(false);
+  const [addingVault, setAddingVault] = useState(false);
+
+  if (addingVault) {
+    return (
+      <div className="screen">
+        <OnboardingScreen
+          mode="add"
+          onDone={() => {
+            setAddingVault(false);
+            nav.reset();
+          }}
+          onCancel={() => setAddingVault(false)}
+        />
+      </div>
+    );
+  }
+
+  const switchVault = async (vault: VaultInfo) => {
+    if (vault.dir === settings.activeVault) return;
+    await update({
+      activeVault: vault.dir,
+      repoUrl: vault.repoUrl,
+      branch: vault.branch,
+      username: vault.username,
+    });
+    setVaultDir(vault.dir);
+    nav.reset();
+    await vaultService.initialize();
+    void syncService.syncNow('vault-switch');
+  };
 
   return (
     <div className="screen">
-      <header className="topbar">
-        <button className="iconbtn" aria-label="Back" onClick={() => nav.back()}>
-          <IconBack />
+      <header className="workspace-top">
+        <button className="iconbtn workspace-top__group" aria-label="Back" onClick={() => nav.back()}>
+          <IconBack size={20} />
         </button>
-        <h1 className="topbar__title">Settings</h1>
+        <span className="workspace-top__status">Settings</span>
       </header>
 
       <div className="scroll">
         <div className="group">
-          <p className="group__label">Vault</p>
+          <p className="group__label">Vaults</p>
           <div className="card">
-            <div className="setting">
+            {settings.vaults.map((v) => (
+              <div className="setting" key={v.dir}>
+                <span className="row__icon">
+                  <IconGit size={20} />
+                </span>
+                <button className="setting__body" style={{ textAlign: 'left' }} onClick={() => void switchVault(v)}>
+                  <p className="setting__label">
+                    {v.name}
+                    {v.dir === settings.activeVault && (
+                      <span style={{ color: 'var(--ember)', fontSize: 'var(--text-xs)' }}> · active</span>
+                    )}
+                  </p>
+                  <p className="setting__desc">
+                    {v.repoUrl.replace(/^https:\/\/github\.com\//, '').replace(/\.git$/, '')} · {v.branch}
+                    {v.dir === settings.activeVault && lastSyncAt
+                      ? ` · synced ${timeAgo(lastSyncAt)}${pendingCount > 0 ? ` · ${pendingCount} pending` : ''}`
+                      : ''}
+                  </p>
+                </button>
+                <button
+                  className="banner__action"
+                  style={{ color: 'var(--danger)' }}
+                  onClick={() => setRemoving(v)}
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+            <button className="setting" onClick={() => setAddingVault(true)}>
               <span className="row__icon">
-                <IconGit size={20} />
+                <IconPlus size={20} />
               </span>
               <div className="setting__body">
-                <p className="setting__label">{repoShortName(settings.repoUrl)}</p>
-                <p className="setting__desc">
-                  Branch {settings.branch ?? 'main'} ·{' '}
-                  {lastSyncAt ? `synced ${timeAgo(lastSyncAt)}` : 'not synced yet'}
-                  {pendingCount > 0 ? ` · ${pendingCount} pending` : ''}
-                </p>
+                <p className="setting__label">Add vault</p>
+                <p className="setting__desc">Clone another repository to this phone</p>
               </div>
-            </div>
+            </button>
             <button className="setting" onClick={() => nav.push({ name: 'history' })}>
               <span className="row__icon">
                 <IconHistory size={20} />
@@ -101,6 +156,22 @@ export function SettingsScreen() {
         </div>
 
         <div className="group">
+          <p className="group__label">Editor</p>
+          <div className="card">
+            <ChoiceSetting
+              label="Default editing mode"
+              desc="Live preview hides markdown syntax except on the line you're editing"
+              options={[
+                { label: 'Live preview', value: 'live' as const },
+                { label: 'Source', value: 'source' as const },
+              ]}
+              value={settings.editorMode}
+              onChange={(v) => void update({ editorMode: v })}
+            />
+          </div>
+        </div>
+
+        <div className="group">
           <p className="group__label">Appearance</p>
           <div className="card">
             <ChoiceSetting
@@ -126,29 +197,12 @@ export function SettingsScreen() {
           </div>
         </div>
 
-        <div className="group">
-          <p className="group__label">Danger zone</p>
-          <div className="card">
-            <button className="setting" onClick={() => setConfirmDisconnect(true)}>
-              <div className="setting__body">
-                <p className="setting__label" style={{ color: 'var(--danger)' }}>
-                  Disconnect vault
-                </p>
-                <p className="setting__desc">
-                  Removes the vault and token from this phone. The repository on GitHub is
-                  untouched.
-                </p>
-              </div>
-            </button>
-          </div>
-        </div>
-
         <p
           style={{
             textAlign: 'center',
             color: 'var(--text-faint)',
             fontSize: 'var(--text-xs)',
-            padding: '26px 0 10px',
+            padding: '26px 0 110px',
             fontFamily: 'var(--font-display)',
           }}
         >
@@ -174,32 +228,43 @@ export function SettingsScreen() {
         />
       )}
 
-      {confirmDisconnect && (
+      {removing && (
         <Dialog
-          title="Disconnect vault?"
-          message="Un-synced local changes will be lost. Everything already pushed is safe on GitHub."
-          confirmLabel="Disconnect"
+          title={`Remove "${removing.name}"?`}
+          message="Un-synced local changes in this vault will be lost. Everything already pushed is safe on GitHub."
+          confirmLabel="Remove"
           danger
-          onCancel={() => setConfirmDisconnect(false)}
+          onCancel={() => setRemoving(null)}
           onConfirm={async () => {
+            const vault = removing;
+            setRemoving(null);
             const engine = getGitEngine();
-            await engine.deleteRepo({ dir: VAULT_DIR });
-            await engine.clearCredentials();
-            await reset();
-            setConfirmDisconnect(false);
-            nav.reset();
-            window.location.reload();
+            await engine.deleteRepo({ dir: vault.dir });
+            const remaining = settings.vaults.filter((v) => v.dir !== vault.dir);
+            if (remaining.length === 0) {
+              await engine.clearCredentials();
+              await reset();
+              window.location.reload();
+              return;
+            }
+            const next = remaining[0];
+            await update({
+              vaults: remaining,
+              activeVault: next.dir,
+              repoUrl: next.repoUrl,
+              branch: next.branch,
+              username: next.username,
+            });
+            if (vault.dir === settings.activeVault) {
+              setVaultDir(next.dir);
+              nav.reset();
+              await vaultService.initialize();
+            }
           }}
         />
       )}
     </div>
   );
-}
-
-function repoShortName(url: string | null): string {
-  if (!url) return 'No repository';
-  const m = /([^/:]+\/[^/]+?)(\.git)?$/.exec(url);
-  return m ? m[1] : url;
 }
 
 function ToggleSetting({

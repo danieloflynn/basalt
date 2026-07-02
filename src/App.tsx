@@ -2,29 +2,40 @@ import { App as CapApp } from '@capacitor/app';
 import { Keyboard } from '@capacitor/keyboard';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { getGitEngine, isNativePlatform, VAULT_DIR } from '@/engine';
-import { syncService, useSettings, vaultService } from '@/services';
-import { currentScreen, useNav } from '@/state/nav';
-import { BrowserScreen } from '@/ui/screens/BrowserScreen';
+import { getGitEngine, isNativePlatform, setVaultDir } from '@/engine';
+import {
+  captureSharedItems,
+  syncService,
+  useSettings,
+  vaultService,
+} from '@/services';
+import { currentScreen, openNote, useNav, type Screen } from '@/state/nav';
+import { Banners } from '@/ui/components/Banners';
+import { IconCalendar, IconNotePlus } from '@/ui/icons';
+import { GraphScreen } from '@/ui/screens/GraphScreen';
+import { HistoryScreen } from '@/ui/screens/HistoryScreen';
+import { NoteScreen } from '@/ui/screens/NoteScreen';
+import { NoteVersionScreen } from '@/ui/screens/NoteVersionScreen';
+import { OnboardingScreen } from '@/ui/screens/OnboardingScreen';
+import { SettingsScreen } from '@/ui/screens/SettingsScreen';
+import { BottomPill } from '@/ui/workspace/BottomPill';
+import { SidebarToggle } from '@/ui/workspace/chrome';
+import { Sidebar } from '@/ui/workspace/Sidebar';
+import './styles/tokens.css';
+import './styles/app.css';
+import './styles/markdown.css';
 
 // CodeMirror is the heaviest chunk — load it only when editing starts (P-4).
 const EditScreen = lazy(() =>
   import('@/ui/screens/EditScreen').then((m) => ({ default: m.EditScreen })),
 );
-import { HistoryScreen } from '@/ui/screens/HistoryScreen';
-import { NoteScreen } from '@/ui/screens/NoteScreen';
-import { OnboardingScreen } from '@/ui/screens/OnboardingScreen';
-import { SearchScreen } from '@/ui/screens/SearchScreen';
-import { SettingsScreen } from '@/ui/screens/SettingsScreen';
-import './styles/tokens.css';
-import './styles/app.css';
-import './styles/markdown.css';
 
 type Boot = 'loading' | 'onboarding' | 'ready';
 
 export function App() {
   const [boot, setBoot] = useState<Boot>('loading');
-  const stack = useNav((s) => s.stack);
+  const nav = useNav();
+  const sidebarOpen = useNav((s) => s.sidebarOpen);
   const theme = useSettings((s) => s.settings.theme);
   const fontScale = useSettings((s) => s.settings.fontScale);
 
@@ -33,8 +44,9 @@ export function App() {
     void (async () => {
       await useSettings.getState().load();
       const { settings } = useSettings.getState();
+      setVaultDir(settings.activeVault);
       const info = await getGitEngine()
-        .repoInfo({ dir: VAULT_DIR })
+        .repoInfo({ dir: settings.activeVault })
         .catch(() => ({ exists: false }));
 
       if (settings.setupComplete && info.exists) {
@@ -42,6 +54,8 @@ export function App() {
         syncService.applySettings();
         setBoot('ready');
         void syncService.onAppActive();
+        const shared = await captureSharedItems();
+        if (shared) openNote(shared);
       } else {
         setBoot('onboarding');
       }
@@ -81,11 +95,16 @@ export function App() {
     };
   }, []);
 
-  // Sync on resume (SY-5); keyboard: keep layout stable.
+  // Sync + shared-text capture on resume (SY-5); stable keyboard layout.
   useEffect(() => {
     if (!isNativePlatform) return;
     const sub = CapApp.addListener('appStateChange', ({ isActive }) => {
-      if (isActive && boot === 'ready') void syncService.onAppActive();
+      if (isActive && boot === 'ready') {
+        void syncService.onAppActive();
+        void captureSharedItems().then((path) => {
+          if (path) openNote(path);
+        });
+      }
     });
     void Keyboard.setScroll({ isDisabled: true }).catch(() => undefined);
     return () => {
@@ -100,46 +119,96 @@ export function App() {
   if (boot === 'onboarding') {
     return (
       <div className="shell">
-        <OnboardingScreen onDone={() => setBoot('ready')} />
+        <OnboardingScreen mode="first" onDone={() => setBoot('ready')} />
       </div>
     );
   }
 
-  const screen = currentScreen(stack);
+  const screen = currentScreen(nav);
+  const showPill = screen.name === 'empty' || screen.name === 'note' || screen.name === 'edit';
+
+  return (
+    <div className="shell">
+      <WorkspaceScreen screen={screen} />
+      <div className="banners-layer">
+        <Banners />
+      </div>
+      {showPill && <BottomPill />}
+      {sidebarOpen && (
+        <>
+          <div className="scrim scrim--sidebar" onClick={() => nav.closeSidebar()} />
+          <Sidebar />
+        </>
+      )}
+    </div>
+  );
+}
+
+function WorkspaceScreen({ screen }: { screen: Screen }) {
   switch (screen.name) {
-    case 'browser':
-      return <BrowserScreen key={screen.folder} folder={screen.folder} />;
+    case 'empty':
+      return <EmptyView />;
     case 'note':
-      return (
-        <div className="shell">
-          <NoteScreen key={screen.path} path={screen.path} />
-        </div>
-      );
+      return <NoteScreen key={screen.path} path={screen.path} heading={screen.heading} />;
     case 'edit':
       return (
-        <div className="shell">
-          <Suspense fallback={<div className="screen" />}>
-            <EditScreen key={screen.path} path={screen.path} />
-          </Suspense>
-        </div>
-      );
-    case 'search':
-      return (
-        <div className="shell">
-          <SearchScreen initialQuery={screen.initialQuery} />
-        </div>
+        <Suspense fallback={<div className="screen" />}>
+          <EditScreen key={screen.path} path={screen.path} />
+        </Suspense>
       );
     case 'settings':
-      return (
-        <div className="shell">
-          <SettingsScreen />
-        </div>
-      );
+      return <SettingsScreen />;
     case 'history':
+      return <HistoryScreen path={screen.path} />;
+    case 'noteVersion':
       return (
-        <div className="shell">
-          <HistoryScreen path={screen.path} />
-        </div>
+        <NoteVersionScreen path={screen.path} oid={screen.oid} when={screen.when} />
       );
+    case 'graph':
+      return <GraphScreen path={screen.path} />;
   }
+}
+
+/** "No file is open" — Obsidian's empty state, Basalt-flavored. */
+function EmptyView() {
+  const nav = useNav();
+  return (
+    <div className="screen">
+      <header className="workspace-top">
+        <SidebarToggle />
+      </header>
+      <div className="state" style={{ justifyContent: 'center' }}>
+        <div className="columns-hero" aria-hidden="true">
+          <div className="col" />
+          <div className="col" />
+          <div className="col" />
+          <div className="col" />
+          <div className="col" />
+        </div>
+        <p className="state__title">No note is open</p>
+        <p className="state__hint">Browse the vault from the top-left, or start writing.</p>
+        <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
+          <button
+            className="btn btn--ghost"
+            style={{ border: '1px solid var(--border)' }}
+            onClick={async () => {
+              const path = await vaultService.openDailyNote();
+              nav.push({ name: 'note', path });
+            }}
+          >
+            <IconCalendar size={18} /> Today
+          </button>
+          <button
+            className="btn btn--primary"
+            onClick={async () => {
+              const path = await vaultService.createNote('', 'Untitled');
+              nav.push({ name: 'edit', path });
+            }}
+          >
+            <IconNotePlus size={18} /> New note
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }

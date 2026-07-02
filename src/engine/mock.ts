@@ -127,6 +127,14 @@ export class MockGitEngine implements GitEngine {
     return [...memoryStore.commits].reverse().slice(0, opts.limit ?? 50);
   }
 
+  async fileAtCommit(opts: { dir: string; oid: string; path: string }): Promise<string | null> {
+    // The mock keeps no real history — synthesize an older version for UI dev.
+    const current = memoryStore.files.get(opts.path);
+    if (!current) return null;
+    const lines = current.text.split('\n');
+    return [...lines.slice(0, Math.max(1, lines.length - 3)), '', `(as of ${opts.oid})`].join('\n');
+  }
+
   onProgress(cb: (p: GitProgress) => void): () => void {
     this.listeners.add(cb);
     return () => this.listeners.delete(cb);

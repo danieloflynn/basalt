@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { getGitEngine, VAULT_DIR, type Author, type GitProgress } from '@/engine';
+import { getGitEngine, vaultDir, type Author, type GitProgress } from '@/engine';
 import { useSettings } from './settings';
 import { vaultService } from './vault';
 
@@ -116,7 +116,7 @@ export class SyncService {
       this.debounceTimer = null;
     }
     this.syncing = true;
-    const dir = VAULT_DIR;
+    const dir = vaultDir();
     const author = this.author();
 
     try {

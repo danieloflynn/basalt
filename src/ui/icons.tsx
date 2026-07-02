@@ -233,6 +233,68 @@ export const IconClock = (p: P) => (
   </I>
 );
 
+export const IconCode = (p: P) => (
+  <I {...p}>
+    <path d="m8 7-5 5 5 5M16 7l5 5-5 5" />
+  </I>
+);
+
+export const IconTabs = (p: P) => (
+  <I {...p}>
+    <rect x="4" y="4" width="16" height="16" rx="3" />
+  </I>
+);
+
+export const IconStar = (p: P) => (
+  <I {...p}>
+    <path d="m12 3 2.7 5.6 6.1.8-4.5 4.3 1.1 6-5.4-2.9L6.6 19.7l1.1-6L3.2 9.4l6.1-.8Z" />
+  </I>
+);
+
+export const IconTag = (p: P) => (
+  <I {...p}>
+    <path d="M12.6 2.6a2 2 0 0 0-1.4-.6H4a2 2 0 0 0-2 2v7.2c0 .5.2 1 .6 1.4l8.8 8.8a2 2 0 0 0 2.8 0l7.2-7.2a2 2 0 0 0 0-2.8Z" />
+    <circle cx="7.5" cy="7.5" r="1" fill="currentColor" />
+  </I>
+);
+
+export const IconGraph = (p: P) => (
+  <I {...p}>
+    <circle cx="5.5" cy="6" r="2.5" />
+    <circle cx="18" cy="5" r="2" />
+    <circle cx="17" cy="17.5" r="2.5" />
+    <circle cx="6" cy="18" r="2" />
+    <path d="M7.8 7.4 15.3 16M7.9 6.5 16 5.4M7.4 16.9l7.2.5" />
+  </I>
+);
+
+export const IconCommand = (p: P) => (
+  <I {...p}>
+    <path d="M9 9V5.5a2.5 2.5 0 1 0-2.5 2.5H9Zm0 0v6m0-6h6M9 15H5.5A2.5 2.5 0 1 0 8 17.5V15Zm6 0v3.5a2.5 2.5 0 1 0 2.5-2.5H15Zm0 0V9m0 6H9m6-6h3.5A2.5 2.5 0 1 0 16 6.5V9Z" />
+  </I>
+);
+
+export const IconCalendar = (p: P) => (
+  <I {...p}>
+    <rect x="3" y="5" width="18" height="16" rx="2" />
+    <path d="M8 3v4M16 3v4M3 10h18" />
+  </I>
+);
+
+export const IconMove = (p: P) => (
+  <I {...p}>
+    <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+    <path d="m10 13 3 3-3 3M13 16H7" />
+  </I>
+);
+
+export const IconRestore = (p: P) => (
+  <I {...p}>
+    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+    <path d="M3 3v5h5" />
+  </I>
+);
+
 export const IconCopy = (p: P) => (
   <I {...p}>
     <rect x="9" y="9" width="12" height="12" rx="2" />

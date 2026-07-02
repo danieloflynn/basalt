@@ -46,9 +46,23 @@ export function isMarkdownPath(p: string): boolean {
 }
 
 const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.avif', '.bmp']);
+const AUDIO_EXTS = new Set(['.mp3', '.m4a', '.wav', '.ogg', '.flac', '.aac']);
+const VIDEO_EXTS = new Set(['.mp4', '.webm', '.mov', '.mkv']);
 
 export function isImagePath(p: string): boolean {
   return IMAGE_EXTS.has(extname(p));
+}
+
+export function isAudioPath(p: string): boolean {
+  return AUDIO_EXTS.has(extname(p));
+}
+
+export function isVideoPath(p: string): boolean {
+  return VIDEO_EXTS.has(extname(p));
+}
+
+export function isPdfPath(p: string): boolean {
+  return extname(p) === '.pdf';
 }
 
 /** Display title of a note: its basename without the .md extension. */

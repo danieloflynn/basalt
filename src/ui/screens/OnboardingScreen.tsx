@@ -1,17 +1,27 @@
 import { useState } from 'react';
-import { getGitEngine, VAULT_DIR, useSyncProgress } from '@/engine/hooks';
+import { getGitEngine, useSyncProgress } from '@/engine/hooks';
+import { setVaultDir } from '@/engine';
 import { syncService, useSettings, vaultService } from '@/services';
 import { IconBack } from '@/ui/icons';
 
 type Step = 'welcome' | 'connect' | 'branch' | 'cloning';
 
 /**
- * Guided first-run: repo URL + token -> validate & list branches -> pick
- * branch -> clone with live progress (ST-1..ST-5).
+ * Guided setup: repo URL + token -> validate & list branches -> pick branch
+ * -> clone with live progress (ST-1..ST-5). mode="add" connects an extra
+ * vault (ST-6) instead of the first one.
  */
-export function OnboardingScreen({ onDone }: { onDone: () => void }) {
+export function OnboardingScreen({
+  mode,
+  onDone,
+  onCancel,
+}: {
+  mode: 'first' | 'add';
+  onDone: () => void;
+  onCancel?: () => void;
+}) {
   const { update } = useSettings();
-  const [step, setStep] = useState<Step>('welcome');
+  const [step, setStep] = useState<Step>(mode === 'first' ? 'welcome' : 'connect');
   const [url, setUrl] = useState('');
   const [username, setUsername] = useState('');
   const [token, setToken] = useState('');
@@ -46,14 +56,27 @@ export function OnboardingScreen({ onDone }: { onDone: () => void }) {
     setStep('cloning');
     setError(null);
     try {
-      await engine.clone({ url, dir: VAULT_DIR, branch: chosen });
+      const { settings } = useSettings.getState();
+      const dir =
+        mode === 'first' && settings.vaults.length === 0
+          ? 'vault'
+          : nextVaultDir(settings.vaults.map((v) => v.dir));
+      const name = url.replace(/\.git$/, '').split('/').slice(-1)[0] || 'Vault';
+
+      await engine.clone({ url, dir, branch: chosen });
       await update({
         repoUrl: url,
         branch: chosen,
         username: username.trim(),
         authorName: username.trim() || 'Basalt',
         setupComplete: true,
+        vaults: [
+          ...settings.vaults,
+          { dir, name, repoUrl: url, branch: chosen, username: username.trim() },
+        ],
+        activeVault: dir,
       });
+      setVaultDir(dir);
       await vaultService.initialize();
       syncService.applySettings();
       onDone();
@@ -102,10 +125,16 @@ export function OnboardingScreen({ onDone }: { onDone: () => void }) {
       {step === 'connect' && (
         <>
           <header className="topbar" style={{ borderBottom: 'none' }}>
-            <button className="iconbtn" aria-label="Back" onClick={() => setStep('welcome')}>
+            <button
+              className="iconbtn"
+              aria-label="Back"
+              onClick={() => (mode === 'first' ? setStep('welcome') : onCancel?.())}
+            >
               <IconBack />
             </button>
-            <h1 className="topbar__title">Connect GitHub</h1>
+            <h1 className="topbar__title">
+              {mode === 'first' ? 'Connect GitHub' : 'Add a vault'}
+            </h1>
           </header>
           <div className="scroll" style={{ padding: '4px var(--pad-screen)' }}>
             <Field
@@ -273,6 +302,12 @@ function Field({
       )}
     </label>
   );
+}
+
+function nextVaultDir(existing: string[]): string {
+  let n = existing.length + 1;
+  while (existing.includes(`vault-${n}`)) n++;
+  return `vault-${n}`;
 }
 
 /** Accept full URLs or shorthand "owner/repo"; always yield an HTTPS clone URL. */

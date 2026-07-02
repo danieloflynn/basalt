@@ -21,6 +21,24 @@ export interface Settings {
   // Appearance (P-1, P-7)
   theme: 'system' | 'dark' | 'light';
   fontScale: number;
+
+  // Editor
+  editorMode: 'live' | 'source';
+
+  // Files
+  sortOrder: 'name' | 'modified';
+
+  // Multi-vault (ST-6). Each vault is a git working tree in its own dir.
+  vaults: VaultInfo[];
+  activeVault: string;
+}
+
+export interface VaultInfo {
+  dir: string;
+  name: string;
+  repoUrl: string;
+  branch: string;
+  username: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -35,6 +53,10 @@ export const DEFAULT_SETTINGS: Settings = {
   authorEmail: 'basalt@localhost',
   theme: 'system',
   fontScale: 1,
+  editorMode: 'live',
+  sortOrder: 'name',
+  vaults: [],
+  activeVault: 'vault',
 };
 
 const STORAGE_KEY = 'basalt.settings';
@@ -55,7 +77,21 @@ export const useSettings = create<SettingsStore>((set, get) => ({
     const { value } = await Preferences.get({ key: STORAGE_KEY });
     if (value) {
       try {
-        set({ settings: { ...DEFAULT_SETTINGS, ...JSON.parse(value) }, loaded: true });
+        const settings: Settings = { ...DEFAULT_SETTINGS, ...JSON.parse(value) };
+        // Migrate single-vault installs to the vault registry.
+        if (settings.setupComplete && settings.vaults.length === 0 && settings.repoUrl) {
+          settings.vaults = [
+            {
+              dir: 'vault',
+              name: settings.repoUrl.replace(/\.git$/, '').split('/').slice(-1)[0] ?? 'Vault',
+              repoUrl: settings.repoUrl,
+              branch: settings.branch ?? 'main',
+              username: settings.username,
+            },
+          ];
+          settings.activeVault = 'vault';
+        }
+        set({ settings, loaded: true });
         return;
       } catch {
         // fall through to defaults

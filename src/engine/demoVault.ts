@@ -92,4 +92,57 @@ Obsidian's feel, GitJournal's data model: plain files in a git repo.
 
 This note lives in the archive. It links back to [[Welcome]].
 `,
+  'Projects/Showcase.md': `---
+tags: [demo]
+status: draft
+---
+
+# Showcase
+
+Everything Obsidian-flavored in one note. ==Highlights render== like this.
+%%This comment is invisible in reading view.%%
+
+Jump within this note: [[#Math]] · [[#Diagrams]].
+
+A block reference lives here — the key insight of the whole project. ^key-idea
+
+Embedded block: ![[Showcase#^key-idea]]
+
+## Math
+
+Inline $E = mc^2$ and display:
+
+$$\\int_0^\\infty e^{-x^2}\\,dx = \\frac{\\sqrt{\\pi}}{2}$$
+
+## Diagrams
+
+\`\`\`mermaid
+graph LR
+  A[Phone] -->|push| B(GitHub)
+  B -->|pull| C[Desktop Obsidian]
+  C -->|push| B
+  B -->|pull| A
+\`\`\`
+
+> [!tip]- Folded callout
+> This callout starts collapsed — tap to open.
+
+Sized image: ![[img.png|120]]
+`,
+  'Templates/Meeting.md': `# {{title}}
+
+Date: {{date}} {{time}}
+
+## Agenda
+
+-
+
+## Notes
+
+`,
+  '.obsidian/daily-notes.json': `{"folder": "Daily", "format": "YYYY-MM-DD"}`,
+  'Daily/2026-07-01.md': `# 2026-07-01
+
+Yesterday's note. Tomorrow: [[2026-07-02]]. #daily
+`,
 };

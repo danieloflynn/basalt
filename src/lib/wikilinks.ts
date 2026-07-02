@@ -100,7 +100,8 @@ export class LinkResolver {
    */
   resolve(target: string, fromPath: string): string | null {
     const cleaned = normalizePath(target.trim());
-    if (!cleaned) return null;
+    // [[#Heading]] / [[#^block]] point into the linking note itself.
+    if (!cleaned) return fromPath || null;
     const lower = cleaned.toLowerCase();
 
     // 1. Path-style targets: vault-absolute, with and without .md.

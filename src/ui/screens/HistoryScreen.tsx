@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
-import { getGitEngine, VAULT_DIR, type CommitInfo } from '@/engine';
+import { getGitEngine, vaultDir, type CommitInfo } from '@/engine';
 import { noteTitle } from '@/lib/paths';
 import { useNav } from '@/state/nav';
-import { IconBack } from '@/ui/icons';
+import { IconBack, IconChevronRight } from '@/ui/icons';
 
-/** Git history, whole vault or a single note (D-4). */
+/** Git history, whole vault or a single note; per-note commits open a diff (D-4). */
 export function HistoryScreen({ path }: { path?: string }) {
   const nav = useNav();
   const [commits, setCommits] = useState<CommitInfo[] | null>(null);
@@ -13,7 +13,7 @@ export function HistoryScreen({ path }: { path?: string }) {
   useEffect(() => {
     let cancelled = false;
     getGitEngine()
-      .log({ dir: VAULT_DIR, limit: 100, path })
+      .log({ dir: vaultDir(), limit: 100, path })
       .then((c) => {
         if (!cancelled) setCommits(c);
       })
@@ -27,14 +27,13 @@ export function HistoryScreen({ path }: { path?: string }) {
 
   return (
     <div className="screen">
-      <header className="topbar">
-        <button className="iconbtn" aria-label="Back" onClick={() => nav.back()}>
-          <IconBack />
+      <header className="workspace-top">
+        <button className="iconbtn workspace-top__group" aria-label="Back" onClick={() => nav.back()}>
+          <IconBack size={20} />
         </button>
-        <h1 className="topbar__title">
-          History
-          {path && <span className="topbar__subtitle">{noteTitle(path)}</span>}
-        </h1>
+        <span className="workspace-top__status">
+          {path ? `History · ${noteTitle(path)}` : 'Vault history'}
+        </span>
       </header>
 
       <div className="scroll" style={{ padding: '4px var(--pad-screen)' }}>
@@ -50,25 +49,49 @@ export function HistoryScreen({ path }: { path?: string }) {
             <p className="state__hint">No commits touch this note yet.</p>
           </div>
         )}
-        {commits?.map((c) => (
-          <div className="commit" key={c.oid}>
-            <div className="commit__dot" />
-            <div>
-              <p className="commit__msg">{c.message}</p>
-              <p className="commit__meta">
-                {c.authorName} · {formatWhen(c.when)} · {c.oid.slice(0, 7)}
-              </p>
+        {commits?.map((c) =>
+          path ? (
+            <button
+              key={c.oid}
+              className="commit"
+              style={{ width: '100%', textAlign: 'left' }}
+              onClick={() =>
+                nav.push({ name: 'noteVersion', path, oid: c.oid, when: c.when })
+              }
+            >
+              <div className="commit__dot" />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p className="commit__msg">{c.message}</p>
+                <p className="commit__meta">
+                  {c.authorName} · {formatWhen(c.when)} · {c.oid.slice(0, 7)}
+                </p>
+              </div>
+              <IconChevronRight size={16} style={{ color: 'var(--text-faint)', flexShrink: 0 }} />
+            </button>
+          ) : (
+            <div className="commit" key={c.oid}>
+              <div className="commit__dot" />
+              <div>
+                <p className="commit__msg">{c.message}</p>
+                <p className="commit__meta">
+                  {c.authorName} · {formatWhen(c.when)} · {c.oid.slice(0, 7)}
+                </p>
+              </div>
             </div>
-          </div>
-        ))}
+          ),
+        )}
+        {path && commits && commits.length > 0 && (
+          <p style={{ fontSize: 'var(--text-xs)', color: 'var(--text-faint)', padding: '12px 4px' }}>
+            Tap a commit to see that version and restore it.
+          </p>
+        )}
       </div>
     </div>
   );
 }
 
 function formatWhen(ms: number): string {
-  const d = new Date(ms);
-  return d.toLocaleString(undefined, {
+  return new Date(ms).toLocaleString(undefined, {
     month: 'short',
     day: 'numeric',
     hour: '2-digit',

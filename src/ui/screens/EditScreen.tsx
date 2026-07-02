@@ -1,24 +1,30 @@
 import { autocompletion, closeBrackets } from '@codemirror/autocomplete';
 import { history, historyKeymap, redo, undo, defaultKeymap } from '@codemirror/commands';
-import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
+import { markdown, markdownKeymap, markdownLanguage } from '@codemirror/lang-markdown';
+import { openSearchPanel, search, searchKeymap } from '@codemirror/search';
 import { EditorState } from '@codemirror/state';
 import { EditorView, keymap, placeholder } from '@codemirror/view';
 import { useEffect, useRef, useState } from 'react';
 import { noteTitle } from '@/lib/paths';
-import { vaultService } from '@/services';
+import { useSettings, vaultService } from '@/services';
 import { useNav } from '@/state/nav';
 import {
-  IconBack,
   IconBold,
+  IconCode,
+  IconDots,
   IconEye,
   IconHeading,
   IconItalic,
   IconList,
   IconRedo,
+  IconSearch,
   IconTodo,
   IconUndo,
   IconWikilink,
 } from '@/ui/icons';
+import { NoteMenu } from '@/ui/components/NoteMenu';
+import { SidebarToggle } from '@/ui/workspace/chrome';
+import { livePreview } from '@/ui/editor/livePreview';
 import { basaltEditorTheme, basaltHighlight } from '@/ui/editor/theme';
 import { wikilinkCompletions } from '@/ui/editor/wikilinkComplete';
 
@@ -26,6 +32,7 @@ const AUTOSAVE_MS = 800;
 
 export function EditScreen({ path }: { path: string }) {
   const nav = useNav();
+  const editorMode = useSettings((s) => s.settings.editorMode);
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -52,14 +59,22 @@ export function EditScreen({ path }: { path: string }) {
           doc: text,
           extensions: [
             history(),
-            keymap.of([...defaultKeymap, ...historyKeymap]),
+            // markdownKeymap first: Enter continues lists, Backspace unwraps.
+            keymap.of([...markdownKeymap, ...searchKeymap, ...defaultKeymap, ...historyKeymap]),
             markdown({ base: markdownLanguage }),
             basaltEditorTheme,
             basaltHighlight,
+            ...(editorMode === 'live' ? [livePreview()] : []),
+            search({ top: true }),
             closeBrackets(),
             autocompletion({ override: [wikilinkCompletions], icons: false }),
             placeholder('Write…'),
             EditorView.lineWrapping,
+            EditorView.contentAttributes.of({
+              spellcheck: 'true',
+              autocapitalize: 'sentences',
+              autocorrect: 'on',
+            }),
             EditorView.updateListener.of((u) => {
               if (!u.docChanged) return;
               dirtyRef.current = true;
@@ -82,56 +97,61 @@ export function EditScreen({ path }: { path: string }) {
         view.destroy();
       }
       viewRef.current = null;
+      setLoaded(false);
     };
-  }, [path]);
+  }, [path, editorMode]);
 
-  const flushAndBack = () => {
-    nav.back();
-  };
+  const [menuOpen, setMenuOpen] = useState(false);
 
   return (
     <div className="screen" style={{ background: 'var(--bg)' }}>
-      <header className="topbar">
-        <button className="iconbtn" aria-label="Done editing" onClick={flushAndBack}>
-          <IconBack />
-        </button>
-        <h1 className="topbar__title">
-          {noteTitle(path)}
-          <span className="topbar__subtitle">{saveState === 'typing' ? 'Editing…' : 'Saved'}</span>
-        </h1>
-        <button
-          className="iconbtn"
-          aria-label="Undo"
-          onClick={() => viewRef.current && undo(viewRef.current)}
-        >
-          <IconUndo />
-        </button>
-        <button
-          className="iconbtn"
-          aria-label="Redo"
-          onClick={() => viewRef.current && redo(viewRef.current)}
-        >
-          <IconRedo />
-        </button>
-        <button
-          className="iconbtn iconbtn--accent"
-          aria-label="Preview"
-          onClick={() => nav.replace({ name: 'note', path })}
-        >
-          <IconEye />
-        </button>
+      <header className="workspace-top">
+        <SidebarToggle />
+        <span className="workspace-top__status">
+          {saveState === 'typing' ? 'Editing…' : noteTitle(path)}
+        </span>
+        <span style={{ flex: 1 }} />
+        <div className="workspace-top__group">
+          <button
+            className="iconbtn"
+            aria-label="Undo"
+            onClick={() => viewRef.current && undo(viewRef.current)}
+          >
+            <IconUndo size={20} />
+          </button>
+          <button
+            className="iconbtn"
+            aria-label="Redo"
+            onClick={() => viewRef.current && redo(viewRef.current)}
+          >
+            <IconRedo size={20} />
+          </button>
+          <button
+            className="iconbtn iconbtn--accent"
+            aria-label="Reading view"
+            onClick={() => nav.replace({ name: 'note', path })}
+          >
+            <IconEye size={20} />
+          </button>
+          <button className="iconbtn" aria-label="Note menu" onClick={() => setMenuOpen(true)}>
+            <IconDots size={20} />
+          </button>
+        </div>
       </header>
 
       <div ref={hostRef} style={{ flex: 1, minHeight: 0, overflow: 'hidden' }} />
       {!loaded && <div className="state" />}
 
       <Toolbar viewRef={viewRef} />
+      {menuOpen && <NoteMenu path={path} onClose={() => setMenuOpen(false)} />}
     </div>
   );
 }
 
 /** Touch formatting bar pinned above the keyboard (E-8). */
 function Toolbar({ viewRef }: { viewRef: React.RefObject<EditorView | null> }) {
+  const { settings, update } = useSettings();
+
   const act = (fn: (v: EditorView) => void) => () => {
     const v = viewRef.current;
     if (!v) return;
@@ -171,6 +191,19 @@ function Toolbar({ viewRef }: { viewRef: React.RefObject<EditorView | null> }) {
       </button>
       <button className="iconbtn" aria-label="Wikilink" onClick={act(insertWikilink)}>
         <IconWikilink size={20} />
+      </button>
+      <button className="iconbtn" aria-label="Find and replace" onClick={act(openSearchPanel)}>
+        <IconSearch size={20} />
+      </button>
+      <button
+        className="iconbtn"
+        aria-label={settings.editorMode === 'live' ? 'Switch to source mode' : 'Switch to live preview'}
+        style={settings.editorMode === 'source' ? { color: 'var(--ember)' } : undefined}
+        onClick={() =>
+          void update({ editorMode: settings.editorMode === 'live' ? 'source' : 'live' })
+        }
+      >
+        <IconCode size={20} />
       </button>
     </div>
   );

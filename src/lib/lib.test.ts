@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { diffLines } from './diff';
 import { parseFrontmatter, serializeFrontmatter } from './frontmatter';
+import { extractBlock, extractOutline, removeComments, slugifyHeading } from './outline';
 import { extractTags } from './tags';
 import { buildTree, walkFiles } from './tree';
 import { dirname, extname, isHiddenPath, joinPath, normalizePath, noteTitle } from './paths';
@@ -121,6 +123,49 @@ describe('extractTags', () => {
       'not#this either, nor #123 pure numbers',
     ].join('\n');
     expect(extractTags(src).sort()).toEqual(['alpha', 'beta', 'gamma', 'proj/sub'].sort());
+  });
+});
+
+describe('outline utilities', () => {
+  it('extracts headings with levels, lines, slugs (skipping code)', () => {
+    const src = '# One\n\ntext\n\n```\n# not a heading\n```\n\n## Two Words!\n';
+    const outline = extractOutline(src);
+    expect(outline).toHaveLength(2);
+    expect(outline[0]).toMatchObject({ level: 1, text: 'One', line: 1, slug: 'one' });
+    expect(outline[1]).toMatchObject({ level: 2, text: 'Two Words!', slug: 'two-words' });
+    expect(slugifyHeading('Héllo & World')).toBe('héllo-world');
+  });
+
+  it('removes comments but keeps line count stable', () => {
+    const src = 'a %%gone%% b\nline2 %%multi\nline%% end\n`%%code%%` stays';
+    const out = removeComments(src);
+    expect(out.split('\n').length).toBe(src.split('\n').length);
+    expect(out).not.toContain('gone');
+    expect(out).not.toContain('multi');
+    expect(out).toContain('`%%code%%` stays');
+  });
+
+  it('extracts a tagged block and strips the marker', () => {
+    const src = 'intro\n\nThe important paragraph\nspanning two lines ^blk1\n\nafter';
+    expect(extractBlock(src, 'blk1')).toBe('The important paragraph\nspanning two lines');
+    expect(extractBlock(src, 'nope')).toBeNull();
+  });
+});
+
+describe('diffLines', () => {
+  it('marks added, removed, and unchanged lines', () => {
+    const diff = diffLines('a\nb\nc', 'a\nx\nc\nd');
+    expect(diff).toEqual([
+      { kind: 'same', text: 'a' },
+      { kind: 'removed', text: 'b' },
+      { kind: 'added', text: 'x' },
+      { kind: 'same', text: 'c' },
+      { kind: 'added', text: 'd' },
+    ]);
+  });
+
+  it('handles identical inputs', () => {
+    expect(diffLines('a\nb', 'a\nb').every((l) => l.kind === 'same')).toBe(true);
   });
 });
 

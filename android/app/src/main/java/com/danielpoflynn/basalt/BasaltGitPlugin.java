@@ -1,7 +1,11 @@
 package com.danielpoflynn.basalt;
 
+import android.content.Intent;
 import android.content.SharedPreferences;
+import android.net.Uri;
+import android.webkit.MimeTypeMap;
 
+import androidx.core.content.FileProvider;
 import androidx.security.crypto.EncryptedSharedPreferences;
 import androidx.security.crypto.MasterKey;
 
@@ -26,6 +30,9 @@ import org.eclipse.jgit.lib.ProgressMonitor;
 import org.eclipse.jgit.lib.Ref;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.revwalk.RevCommit;
+import org.eclipse.jgit.revwalk.RevTree;
+import org.eclipse.jgit.revwalk.RevWalk;
+import org.eclipse.jgit.treewalk.TreeWalk;
 import org.eclipse.jgit.transport.CredentialsProvider;
 import org.eclipse.jgit.transport.PushResult;
 import org.eclipse.jgit.transport.RemoteRefUpdate;
@@ -61,6 +68,75 @@ public class BasaltGitPlugin extends Plugin {
     private static final long MAX_TEXT_FILE_BYTES = 5L * 1024 * 1024;
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private final List<JSObject> pendingShares = new ArrayList<>();
+
+    // ------------------------------------------------------------------
+    // Share-sheet capture (ACTION_SEND text into the vault)
+    // ------------------------------------------------------------------
+
+    @Override
+    public void load() {
+        Intent intent = getActivity() == null ? null : getActivity().getIntent();
+        if (intent != null) captureShareIntent(intent);
+    }
+
+    @Override
+    protected void handleOnNewIntent(Intent intent) {
+        super.handleOnNewIntent(intent);
+        captureShareIntent(intent);
+    }
+
+    private void captureShareIntent(Intent intent) {
+        if (!Intent.ACTION_SEND.equals(intent.getAction())) return;
+        String text = intent.getStringExtra(Intent.EXTRA_TEXT);
+        if (text == null || text.isEmpty()) return;
+        JSObject item = new JSObject();
+        item.put("text", text);
+        String subject = intent.getStringExtra(Intent.EXTRA_SUBJECT);
+        if (subject != null) item.put("subject", subject);
+        synchronized (pendingShares) {
+            pendingShares.add(item);
+        }
+        // Consume so a config change doesn't re-deliver the same share.
+        intent.removeExtra(Intent.EXTRA_TEXT);
+    }
+
+    @PluginMethod
+    public void consumePendingShares(PluginCall call) {
+        JSArray items = new JSArray();
+        synchronized (pendingShares) {
+            for (JSObject item : pendingShares) items.put(item);
+            pendingShares.clear();
+        }
+        JSObject out = new JSObject();
+        out.put("items", items);
+        call.resolve(out);
+    }
+
+    @PluginMethod
+    public void openFile(PluginCall call) {
+        String path = call.getString("path");
+        File file = new File(repoDir(call), path == null ? "" : path);
+        try {
+            if (!file.isFile()) {
+                call.reject("File not found: " + path);
+                return;
+            }
+            Uri uri = FileProvider.getUriForFile(
+                    getContext(), getContext().getPackageName() + ".fileprovider", file);
+            String ext = path != null && path.contains(".")
+                    ? path.substring(path.lastIndexOf('.') + 1).toLowerCase(Locale.ROOT)
+                    : "";
+            String mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext);
+            Intent view = new Intent(Intent.ACTION_VIEW);
+            view.setDataAndType(uri, mime != null ? mime : "*/*");
+            view.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(view);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("No app can open this file type.", e.getClass().getSimpleName(), e);
+        }
+    }
 
     private interface Work {
         JSObject run() throws Exception;
@@ -558,6 +634,30 @@ public class BasaltGitPlugin extends Plugin {
                 }
                 JSObject out = new JSObject();
                 out.put("commits", commits);
+                return out;
+            }
+        });
+    }
+
+    @PluginMethod
+    public void fileAtCommit(PluginCall call) {
+        File dir = repoDir(call);
+        String oid = call.getString("oid");
+        String path = call.getString("path");
+        run(call, () -> {
+            try (Git git = Git.open(dir); RevWalk walk = new RevWalk(git.getRepository())) {
+                Repository repo = git.getRepository();
+                RevCommit commit = walk.parseCommit(repo.resolve(oid));
+                RevTree tree = commit.getTree();
+                JSObject out = new JSObject();
+                try (TreeWalk treeWalk = TreeWalk.forPath(repo, path, tree)) {
+                    if (treeWalk == null) {
+                        out.put("content", JSObject.NULL);
+                        return out;
+                    }
+                    ObjectLoader loader = repo.open(treeWalk.getObjectId(0));
+                    out.put("content", new String(loader.getBytes(), StandardCharsets.UTF_8));
+                }
                 return out;
             }
         });
