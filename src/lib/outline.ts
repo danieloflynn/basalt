@@ -54,6 +54,17 @@ export function removeComments(source: string): string {
   return out;
 }
 
+/** Hide ^block-id markers in reading view (line count preserved). */
+export function stripBlockMarkers(source: string): string {
+  const scanLines = stripCode(source).split('\n');
+  const lines = source.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const m = /\s+\^[A-Za-z0-9-]+\s*$/.exec(scanLines[i]);
+    if (m) lines[i] = lines[i].slice(0, m.index);
+  }
+  return lines.join('\n');
+}
+
 /** Extract the block (paragraph or list item) tagged with ^blockId. */
 export function extractBlock(source: string, blockId: string): string | null {
   const lines = source.split('\n');

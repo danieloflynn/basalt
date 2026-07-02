@@ -10,7 +10,7 @@ import remarkMath from 'remark-math';
 import remarkParse from 'remark-parse';
 import remarkRehype from 'remark-rehype';
 import { unified } from 'unified';
-import { extractBlock, removeComments, slugifyHeading } from '@/lib/outline';
+import { extractBlock, removeComments, slugifyHeading, stripBlockMarkers } from '@/lib/outline';
 import { isAudioPath, isMarkdownPath, isPdfPath, isVideoPath } from '@/lib/paths';
 import { openFileExternally } from '@/engine';
 import { vaultService } from '@/services';
@@ -401,7 +401,7 @@ export function Markdown({ source, path, depth = 0, onToggleTask }: MarkdownProp
   const ctx = useMemo(() => ({ path, depth, onToggleTask }), [path, depth, onToggleTask]);
   const content = useMemo<ReactNode>(() => {
     try {
-      return processor.processSync(removeComments(source)).result;
+      return processor.processSync(stripBlockMarkers(removeComments(source))).result;
     } catch {
       return <pre>{source}</pre>;
     }
