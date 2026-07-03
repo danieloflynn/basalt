@@ -27,7 +27,11 @@ const treeRow = (page: Page, name: string) =>
   page.locator('.sidebar').getByRole('button', { name, exact: true });
 
 async function openFileTree(page: Page): Promise<void> {
-  await page.getByRole('button', { name: 'Open sidebar' }).click();
+  // Drawers are full-width now: when the sidebar is already open the toggle
+  // underneath is covered, so only tap it when the tree isn't showing yet.
+  if ((await page.locator('.sidebar[data-open]').count()) === 0) {
+    await page.getByRole('button', { name: 'Open sidebar' }).click();
+  }
   await expect(page.locator('.sidebar[data-open]')).toBeVisible();
 }
 
@@ -76,10 +80,6 @@ test.describe('creating notes', () => {
     await expect(treeRow(page, 'Untitled')).toBeVisible();
   });
 
-  // BUG: renaming a note created this session throws
-  // "MiniSearch: cannot discard document with ID Untitled.md: it is not in the
-  // index" (src/services/vault.ts renameFile -> search.discard; root cause:
-  // createNote never indexes the new note). Expected behavior asserted below.
   test('renaming a fresh note commits the rename and moves focus to the body', async ({
     page,
   }) => {
@@ -169,17 +169,12 @@ test.describe('creating notes', () => {
     await expect(treeRow(page, '2026-07-02')).toHaveCount(2);
   });
 
-  // BUG: same root cause as above — createFromTemplate's writeNote throws on
-  // search.replace (note never indexed by createNote), so the push into the
-  // editor never happens: the palette closes and the app stays on the empty
-  // screen while the file quietly exists on disk. Expected behavior below.
   test('template flow: editor opens with content, title NOT autofocused', async ({
     page,
   }) => {
     await onboard(page);
     await page.getByRole('button', { name: 'Command palette' }).click();
     await page.getByRole('button', { name: 'New note from template' }).click();
-    await page.getByText('Choose a template').waitFor();
     await page.locator('.quickopen').getByRole('button', { name: 'Meeting' }).click();
 
     await expect(editorBody(page)).toBeVisible();
@@ -190,8 +185,6 @@ test.describe('creating notes', () => {
     await expect(title(page)).not.toBeFocused();
   });
 
-  // BUG: same root cause — Duplicate's writeNote throws after the copy is
-  // written to disk, so onClose is skipped and the sheet stays open.
   test('duplicate: sheet closes and the copy appears in the tree', async ({ page }) => {
     await onboard(page);
     await openFileTree(page);
@@ -407,9 +400,6 @@ test.describe('renaming via the inline title', () => {
     await expect(treeRow(page, 'Nonsense')).toHaveCount(0);
   });
 
-  // BUG: fresh-note rename fails (createNote never indexes the note; the
-  // renameFile search.discard throws). Expected: the buffer flushes to the old
-  // path before the rename and travels with the file — no orphan Untitled.
   test('typed body survives an immediate rename; no orphan under the old name', async ({
     page,
   }) => {
@@ -432,9 +422,6 @@ test.describe('renaming via the inline title', () => {
     await expect(treeRow(page, 'Untitled')).toHaveCount(0);
   });
 
-  // BUG: the first autosave of a fresh note throws on search.replace (note was
-  // never indexed by createNote), so its content is written to disk but never
-  // indexed — full-text search can't find it until the vault reinitializes.
   test('a fresh note is full-text searchable after its first autosave', async ({ page }) => {
     await onboard(page);
     await newNoteFromPill(page);
@@ -447,7 +434,7 @@ test.describe('renaming via the inline title', () => {
     await expect(page.locator('.sidebar').getByRole('button', { name: /Untitled/ })).toBeVisible();
   });
 
-  test('renaming a linked note rewrites inbound wikilinks, which still resolve', async ({
+  test('renaming a linked note rewrites inbound wikilinks in raw source, which still resolve', async ({
     page,
   }) => {
     await onboard(page);
@@ -456,12 +443,41 @@ test.describe('renaming via the inline title', () => {
     await commitTitle(page, 'Home Base');
     await expect(title(page)).toHaveValue('Home Base');
 
+    // The rename must rewrite the LITERAL source of the linking note, not just
+    // the rendered anchor. Read Old Note's raw markdown in source mode.
     await openNoteFromTree(page, 'Old Note');
+    await page.getByRole('button', { name: 'Edit note' }).click();
+    await editorBody(page).click();
+    await page.getByRole('button', { name: 'Switch to source mode' }).click();
+    await expect(editorBody(page)).toContainText('[[Home Base]]');
+    await expect(editorBody(page)).not.toContainText('[[Welcome]]'); // old target gone
+
+    // And rendered, the rewritten link resolves and navigates.
+    await page.getByRole('button', { name: 'Reading view' }).click();
     const link = page.locator('a.wikilink', { hasText: 'Home Base' });
     await expect(link).toBeVisible();
     await expect(link).not.toHaveClass(/wikilink--unresolved/);
     await link.click();
     await expect(title(page)).toHaveValue('Home Base'); // link followed the rename
+  });
+
+  test('renaming a note rewrites inbound ![[embeds]] in raw source too', async ({ page }) => {
+    await onboard(page);
+    // Reach Projects/Basalt via Welcome's aliased link, then rename it in place.
+    await openNoteFromTree(page, 'Welcome');
+    await page.locator('a.wikilink', { hasText: 'Basalt project note' }).click();
+    await expect(title(page)).toHaveValue('Basalt');
+    await commitTitle(page, 'Core Idea');
+    await expect(title(page)).toHaveValue('Core Idea');
+
+    // Reading List embeds ![[Projects/Basalt#Why]] — the embed (with its folder
+    // and #heading) must be repointed to the new name in the literal source.
+    await openNoteFromTree(page, 'Reading List');
+    await page.getByRole('button', { name: 'Edit note' }).click();
+    await editorBody(page).click();
+    await page.getByRole('button', { name: 'Switch to source mode' }).click();
+    await expect(editorBody(page)).toContainText('![[Projects/Core Idea#Why]]');
+    await expect(editorBody(page)).not.toContainText('Projects/Basalt'); // old embed gone
   });
 
   test('back/forward history survives a rename in every direction', async ({ page }) => {
@@ -514,5 +530,214 @@ test.describe('renaming via the inline title', () => {
     await openFileTree(page);
     await expect(treeRow(page, 'Someday Maybe')).toBeVisible();
     await expect(treeRow(page, 'Someday')).toHaveCount(0);
+  });
+
+  test('a pipe in the inline title is sanitized to a dash; inbound links still resolve', async ({
+    page,
+  }) => {
+    await onboard(page);
+    await openNoteFromTree(page, 'Welcome');
+    await commitTitle(page, 'Home|Base');
+    await expect(title(page)).toHaveValue('Home-Base'); // | is not path-legal → '-'
+
+    await openFileTree(page);
+    await expect(treeRow(page, 'Home-Base')).toBeVisible();
+    await expect(treeRow(page, 'Welcome')).toHaveCount(0);
+
+    // Old Note's [[Welcome]] followed the sanitized rename and still resolves.
+    await openNoteFromTree(page, 'Old Note');
+    const link = page.locator('a.wikilink', { hasText: 'Home-Base' });
+    await expect(link).toBeVisible();
+    await expect(link).not.toHaveClass(/wikilink--unresolved/);
+    await link.click();
+    await expect(title(page)).toHaveValue('Home-Base');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Note ⋮ menu — safe rename and move
+// ---------------------------------------------------------------------------
+
+test.describe('note menu rename and move', () => {
+  test('Rename onto an existing name dedupes — neither note is destroyed', async ({ page }) => {
+    await onboard(page);
+    await openNoteFromTree(page, 'Reading List'); // reading view
+    await page.getByRole('button', { name: 'Note menu' }).click();
+    await page.locator('.sheet').getByRole('button', { name: 'Rename' }).click();
+    // Dialog prefilled with "Reading List"; rename it onto the existing "Welcome".
+    const dialog = page.getByRole('dialog', { name: 'Rename note' });
+    await dialog.locator('input').fill('Welcome');
+    await dialog.getByRole('button', { name: 'Rename' }).click();
+
+    await openFileTree(page);
+    await expect(treeRow(page, 'Welcome')).toBeVisible(); // the original survives
+    await expect(treeRow(page, 'Welcome 2')).toBeVisible(); // ours deduped in
+    await expect(treeRow(page, 'Reading List')).toHaveCount(0);
+
+    // The original Welcome's content is intact — this is the note-destruction guard.
+    await treeRow(page, 'Welcome').click();
+    await expect(title(page)).toHaveValue('Welcome');
+    await expect(page.locator('.md')).toContainText('browser demo vault');
+  });
+
+  test('Move to folder repoints folder-qualified inbound links; tab history follows', async ({
+    page,
+  }) => {
+    await onboard(page);
+    // Reach Projects/Basalt (folder-qualified links point at it) via Welcome.
+    await openNoteFromTree(page, 'Welcome');
+    await page.locator('a.wikilink', { hasText: 'Basalt project note' }).click();
+    await expect(title(page)).toHaveValue('Basalt');
+
+    // Move it to the vault root via the ⋮ menu.
+    await page.getByRole('button', { name: 'Note menu' }).click();
+    await page.locator('.sheet').getByRole('button', { name: 'Move to folder…' }).click();
+    await page.locator('.sheet').getByRole('button', { name: 'Vault root' }).click();
+
+    // Tab history followed the move: still on Basalt, content intact, no error state.
+    await expect(title(page)).toHaveValue('Basalt');
+    await expect(page.locator('.md')).toContainText('A beautiful Android markdown vault');
+    await expect(page.locator('.state__title')).toHaveCount(0);
+
+    // The folder-qualified inbound embed was repointed to the new (root) location.
+    await openNoteFromTree(page, 'Reading List');
+    await page.getByRole('button', { name: 'Edit note' }).click();
+    await editorBody(page).click();
+    await page.getByRole('button', { name: 'Switch to source mode' }).click();
+    await expect(editorBody(page)).toContainText('![[Basalt#Why]]');
+    await expect(editorBody(page)).not.toContainText('Projects/Basalt');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// File actions sheet — folder rename (children move; sibling collision dedupes)
+// ---------------------------------------------------------------------------
+
+test.describe('folder rename via the file actions sheet', () => {
+  async function renameFolder(page: Page, folder: string, to: string): Promise<void> {
+    await openFileTree(page);
+    await treeRow(page, folder).click({ button: 'right' }); // long-press sheet
+    await expect(page.locator('.sheet')).toBeVisible();
+    await page.locator('.sheet').getByRole('button', { name: 'Rename' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Rename folder' });
+    await dialog.locator('input').fill(to);
+    await dialog.getByRole('button', { name: 'Rename' }).click();
+  }
+
+  test('happy path: the folder renames and its children move with it', async ({ page }) => {
+    await onboard(page);
+    await renameFolder(page, 'Archive', 'Vault Archive');
+
+    await openFileTree(page);
+    await expect(treeRow(page, 'Vault Archive')).toBeVisible();
+    await expect(treeRow(page, 'Archive')).toHaveCount(0);
+    // The child note moved with the folder and still opens with its content.
+    await treeRow(page, 'Old Note').click();
+    await expect(title(page)).toHaveValue('Old Note');
+    await expect(page.locator('.md')).toContainText('lives in the archive');
+  });
+
+  test('onto a sibling name it dedupes to "Projects 2"; nothing is lost', async ({ page }) => {
+    await onboard(page);
+    // A sibling folder "Projects" already exists at the root.
+    await renameFolder(page, 'Archive', 'Projects');
+
+    await openFileTree(page);
+    await expect(treeRow(page, 'Projects 2')).toBeVisible(); // deduped folder
+    await expect(treeRow(page, 'Old Note')).toBeVisible(); // moved child, not lost
+    await expect(treeRow(page, 'Basalt')).toBeVisible(); // original Projects intact
+    await expect(treeRow(page, 'Showcase')).toBeVisible();
+    // The moved child really lives at its new path.
+    await treeRow(page, 'Old Note').click();
+    await expect(title(page)).toHaveValue('Old Note');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Settings-driven flows: templates, default new-note location, add-vault
+// ---------------------------------------------------------------------------
+
+test.describe('settings-driven flows', () => {
+  async function openSettings(page: Page): Promise<void> {
+    await page.getByRole('button', { name: 'Open sidebar' }).click();
+    await page.getByRole('button', { name: 'Settings' }).click();
+    await page.getByText('Sync').first().waitFor();
+  }
+
+  test('Settings shows a Templates section and accepts a template folder', async ({ page }) => {
+    await onboard(page);
+    await openSettings(page);
+
+    const templates = page.locator('.group', { hasText: 'Templates' });
+    await expect(templates.getByText('Template folder location')).toBeVisible();
+    const input = templates.locator('input');
+    await input.fill('templates');
+    await input.press('Enter');
+    await expect(input).toHaveValue('templates');
+  });
+
+  test('palette Insert template drops the template at the caret with {{date}} filled', async ({
+    page,
+  }) => {
+    await onboard(page);
+    // Open a note in the editor, but do NOT focus the body — the bottom pill
+    // (and its command palette) is only shown while the editor is unfocused.
+    await openNoteFromTree(page, 'Someday');
+    await page.getByRole('button', { name: 'Edit note' }).click();
+    await expect(editorBody(page)).toBeVisible();
+
+    await page.getByRole('button', { name: 'Command palette' }).click();
+    await page.getByRole('button', { name: 'Insert template' }).click();
+    await page.getByText('Insert a template').waitFor();
+    await page.locator('.quickopen').getByRole('button', { name: 'Meeting' }).click();
+
+    // The Meeting template body landed in the open note; {{date}} → the fixed date.
+    await expect(editorBody(page)).toContainText('Date: 2026-07-02');
+    await expect(editorBody(page)).toContainText('Agenda');
+  });
+
+  test('default new-note location = folder: bottom-pill New note lands inside it', async ({
+    page,
+  }) => {
+    await onboard(page);
+    await openSettings(page);
+
+    const group = page.locator('.group', { hasText: 'New notes' });
+    await group.getByRole('button', { name: 'Folder', exact: true }).click();
+    const folderInput = group.locator('.setting', { hasText: 'New note folder' }).locator('input');
+    await folderInput.fill('Projects');
+    await folderInput.press('Enter');
+
+    await page.getByRole('button', { name: 'Back' }).click(); // back to the workspace
+    await newNoteFromPill(page); // creates Untitled in the configured default folder
+    await expect(title(page)).toHaveValue('Untitled');
+
+    await openFileTree(page);
+    await expect(treeRow(page, 'Untitled')).toBeVisible();
+    await treeRow(page, 'Projects').click(); // collapse Projects…
+    await expect(treeRow(page, 'Untitled')).toHaveCount(0); // …the note lived inside it
+  });
+
+  test('Add vault with saved credentials asks only for the repository', async ({ page }) => {
+    await onboard(page);
+    await openSettings(page);
+    await page.getByRole('button', { name: /Add vault/ }).click();
+
+    // Connect step in reuse-credentials mode: repository field + PAT reminder only.
+    // (exact: true so the reminder's own "…and access token" copy can't match.)
+    await expect(page.getByText('Add a vault')).toBeVisible(); // header title
+    await expect(page.getByText('Repository', { exact: true })).toBeVisible();
+    await expect(page.getByText('GitHub username', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('Access token', { exact: true })).toHaveCount(0);
+    await expect(page.locator('input[type=password]')).toHaveCount(0); // no token input
+    await expect(page.getByText(/token can reach this repository/i)).toBeVisible();
+
+    // The escape hatch reveals the full credential form.
+    const escape = page.getByRole('button', { name: 'Use a different account or token' });
+    await expect(escape).toBeVisible();
+    await escape.click();
+    await expect(page.getByText('GitHub username', { exact: true })).toBeVisible();
+    await expect(page.getByText('Access token', { exact: true })).toBeVisible();
+    await expect(page.locator('input[type=password]')).toHaveCount(1);
   });
 });

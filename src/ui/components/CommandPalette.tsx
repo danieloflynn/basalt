@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { syncService, useSettings, vaultService, type NoteMeta } from '@/services';
 import { useNav } from '@/state/nav';
+import { defaultNewNoteFolder, insertTemplate, listTemplateNotes } from '@/ui/templates';
 import {
   IconCalendar,
   IconCommand,
@@ -12,6 +13,8 @@ import {
   IconSync,
   IconTag,
 } from '@/ui/icons';
+
+type TemplatePicker = { mode: 'new' | 'insert'; items: NoteMeta[] };
 
 interface Command {
   id: string;
@@ -25,7 +28,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   const nav = useNav();
   const { settings, update } = useSettings();
   const [query, setQuery] = useState('');
-  const [templates, setTemplates] = useState<NoteMeta[] | null>(null);
+  const [picker, setPicker] = useState<TemplatePicker | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -48,10 +51,13 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
         id: 'template',
         label: 'New note from template',
         icon: <IconNotePlus size={18} />,
-        run: async () => {
-          setTemplates(await vaultService.listTemplates());
-          return;
-        },
+        run: () => setPicker({ mode: 'new', items: listTemplateNotes() }),
+      },
+      {
+        id: 'insert-template',
+        label: 'Insert template',
+        icon: <IconCommand size={18} />,
+        run: () => setPicker({ mode: 'insert', items: listTemplateNotes() }),
       },
       {
         id: 'sync',
@@ -110,35 +116,49 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     return commands.filter((c) => c.label.toLowerCase().includes(q));
   }, [commands, query]);
 
+  const opensPicker = (id: string) => id === 'template' || id === 'insert-template';
+
   const runCommand = async (c: Command) => {
     const result = c.run();
-    if (c.id !== 'template') onClose();
+    if (!opensPicker(c.id)) onClose();
     await result;
   };
 
-  if (templates !== null) {
+  if (picker !== null) {
+    const { mode, items } = picker;
     return (
       <>
         <div className="scrim" onClick={onClose} />
         <div className="quickopen">
           <p className="sheet__title" style={{ padding: '8px 12px' }}>
-            {templates.length ? 'Choose a template' : 'No templates found'}
+            {items.length === 0
+              ? 'No templates found'
+              : mode === 'insert'
+                ? 'Insert a template'
+                : 'New note from template'}
           </p>
-          {templates.length === 0 && (
+          {items.length === 0 && (
             <p className="state__hint" style={{ padding: '0 14px 14px' }}>
-              Put template notes in a "Templates" folder (or the folder set in Obsidian's
-              Templates plugin settings).
+              Put template notes in your template folder, then set its location under
+              Settings → Templates.
             </p>
           )}
           <div className="quickopen__results">
-            {templates.map((t) => (
+            {items.map((t) => (
               <button
                 key={t.path}
                 className="tree-row"
                 onClick={async () => {
                   onClose();
-                  const path = await vaultService.createFromTemplate(t.path);
-                  useNav.getState().push({ name: 'edit', path });
+                  if (mode === 'insert') {
+                    await insertTemplate(t.path);
+                  } else {
+                    const path = await vaultService.createFromTemplate(
+                      t.path,
+                      defaultNewNoteFolder(),
+                    );
+                    useNav.getState().push({ name: 'edit', path });
+                  }
                 }}
               >
                 <span className="tree-row__name">{t.title}</span>

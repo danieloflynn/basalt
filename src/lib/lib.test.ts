@@ -7,7 +7,7 @@ import { buildTree, walkFiles } from './tree';
 import { dirname, extname, isHiddenPath, joinPath, normalizePath, noteTitle } from './paths';
 import { LinkResolver, parseWikilinks, wikilinkDisplayText } from './wikilinks';
 import { stripInlineMarkdown } from './plaintext';
-import { claimAxis, drawerProgress, pullTriggered, settleOpen, velocityX } from './gesture';
+import { claimAxis, drawerProgress, FLING_VELOCITY, pullTriggered, settleOpen, velocityX } from './gesture';
 
 describe('paths', () => {
   it('normalizes separators and dots', () => {
@@ -251,6 +251,33 @@ describe('gesture math', () => {
     ];
     expect(velocityX(samples)).toBeCloseTo(0.4);
     expect(velocityX([{ t: 0, x: 0, y: 0 }])).toBe(0);
+  });
+
+  it('drops stale flick velocity after a motionless hold before release', () => {
+    // A fast leftward drag, then the finger holds still for ~2s before lifting.
+    const fast = [
+      { t: 0, x: 200, y: 0 },
+      { t: 40, x: 120, y: 0 },
+      { t: 80, x: 20, y: 0 }, // ~2.25 px/ms up to here
+    ];
+    // Released promptly (10ms after the last sample): a genuine fling stands.
+    expect(velocityX(fast, 90)).toBeLessThanOrEqual(-FLING_VELOCITY);
+    // Released 2s after the last movement sample: no flick — velocity is 0.
+    expect(velocityX(fast, 2080)).toBe(0);
+    // With velocity gone, the position rule alone decides where it settles.
+    expect(settleOpen(0.7, velocityX(fast, 2080))).toBe(true);
+    expect(settleOpen(0.3, velocityX(fast, 2080))).toBe(false);
+  });
+
+  it('still flings when the finger lifts right after moving', () => {
+    const flick = [
+      { t: 0, x: 0, y: 0 },
+      { t: 40, x: 90, y: 0 },
+      { t: 80, x: 200, y: 0 },
+    ];
+    const v = velocityX(flick, 92); // released 12ms after the last sample
+    expect(v).toBeGreaterThanOrEqual(FLING_VELOCITY);
+    expect(settleOpen(0.1, v)).toBe(true); // fling wins over the closed position
   });
 
   it('triggers pull-down only for a firmly vertical drag', () => {

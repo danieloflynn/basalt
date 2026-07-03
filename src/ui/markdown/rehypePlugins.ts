@@ -82,6 +82,48 @@ function collectText(node: Element): string {
 }
 
 /**
+ * Note transclusions (a[data-embed]) render as block-level cards containing a
+ * nested <Markdown> full of <p>/<h*> children — invalid inside the host
+ * paragraph (React flags div-in-p and p-in-p on every embed). Hoist them out:
+ * a <p> containing note embeds is split into paragraph segments with the
+ * embeds as block siblings. Media embeds (data-media, img) stay inline.
+ */
+export function rehypeHoistEmbeds() {
+  const isNoteEmbed = (c: ElementContent): c is Element =>
+    c.type === 'element' && c.tagName === 'a' && c.properties?.['data-embed'] === 'true';
+  const isBlankText = (c: ElementContent): boolean =>
+    c.type === 'text' && (c as Text).value.trim() === '';
+
+  return (tree: Root) => {
+    visit(tree, 'element', (node: Element, index, parent) => {
+      if (node.tagName !== 'p' || index === undefined || !parent) return;
+      if (!node.children.some(isNoteEmbed)) return;
+
+      const out: ElementContent[] = [];
+      let run: ElementContent[] = [];
+      const flush = () => {
+        if (run.length && !run.every(isBlankText)) {
+          out.push({ ...node, children: run });
+        }
+        run = [];
+      };
+      for (const child of node.children) {
+        if (isNoteEmbed(child)) {
+          flush();
+          out.push(child);
+        } else {
+          run.push(child);
+        }
+      }
+      flush();
+      parent.children.splice(index, 1, ...out);
+      // Re-visit the replacement position (embeds themselves have no <p> kids).
+      return index;
+    });
+  };
+}
+
+/**
  * Rewrites remark-math output and mermaid code fences into custom elements
  * that rehype-react maps to lazy-loaded components:
  *   code.math-inline          -> <math-inline>tex</math-inline>

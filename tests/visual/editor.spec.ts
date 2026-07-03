@@ -173,3 +173,92 @@ test('editor headings use the reading view font family', async ({ page }) => {
 
   expect(editorFont).toBe(readingFont);
 });
+
+// ---------------------------------------------------------------------------
+// Frontmatter is source-mode dim/mono, never a display heading (bug 7)
+// ---------------------------------------------------------------------------
+
+test('frontmatter renders monospace, never as a Fraunces heading', async ({ page }) => {
+  await onboard(page);
+  await openInEditor(page, 'Showcase'); // frontmatter: tags: [demo] / status: draft
+
+  // The styled token span wrapping a YAML key line — its font is what regressed
+  // (a leading `---` block used to parse as HR + setext-H2 → display face).
+  const fmFont = () =>
+    page
+      .locator('.cm-line', { hasText: 'status: draft' })
+      .locator('span')
+      .first()
+      .evaluate((el) => getComputedStyle(el).fontFamily);
+
+  const liveFont = await fmFont();
+  expect(liveFont.toLowerCase()).toContain('mono');
+  expect(liveFont).not.toMatch(/Fraunces/i);
+
+  // Same in source mode.
+  await body(page).click();
+  await page.getByRole('button', { name: 'Switch to source mode' }).click();
+  await expect(body(page)).toBeVisible();
+  const sourceFont = await fmFont();
+  expect(sourceFont.toLowerCase()).toContain('mono');
+  expect(sourceFont).not.toMatch(/Fraunces/i);
+});
+
+// ---------------------------------------------------------------------------
+// Wikilinks inside task / list lines are link-colored (celadon)
+// ---------------------------------------------------------------------------
+
+test('a wikilink inside a task line is link-colored, like other list wikilinks', async ({
+  page,
+}) => {
+  await onboard(page);
+  // Welcome has "- [ ] Read [[Reading List]]" (task line) and
+  // "- A daily note: [[2026-07-02]]" (plain list line). Opening lands the caret
+  // at the doc start, so both lines below stay inactive and render their widgets.
+  await openInEditor(page, 'Welcome');
+
+  const taskLink = page
+    .locator('.cm-line', { has: page.locator('.lp-checkbox') })
+    .locator('.lp-wikilink'); // [[Reading List]] inside the checkbox line
+  const listLink = page.locator('.lp-wikilink', { hasText: '2026-07-02' });
+  await expect(taskLink).toBeVisible();
+  await expect(listLink).toBeVisible();
+
+  const taskColor = await taskLink.evaluate((el) => getComputedStyle(el).color);
+  const listColor = await listLink.evaluate((el) => getComputedStyle(el).color);
+  const bodyColor = await page.locator('.cm-content').evaluate((el) => getComputedStyle(el).color);
+
+  expect(taskColor).toBe(listColor); // same celadon link color as a normal list wikilink
+  expect(taskColor).not.toBe(bodyColor); // and distinctly coloured vs plain body text
+});
+
+// ---------------------------------------------------------------------------
+// Heading anchors survive the editing-mode reroute (caret lands on the heading)
+// ---------------------------------------------------------------------------
+
+test('an editing-mode heading link reroutes into the editor with the caret on that heading', async ({
+  page,
+}) => {
+  await onboard(page);
+  // 2026-07-02 links to [[Projects/Basalt#Architecture]] (a cross-note heading).
+  await openFromTree(page, '2026-07-02'); // X, reading view
+  await expect(title(page)).toHaveValue('2026-07-02');
+
+  // Open a second note and switch it to editing so the mode goes global, then
+  // step Back into X's (still-reading) history entry with editing mode now on.
+  await openFromTree(page, 'Welcome'); // Y, reading (history: empty, X, Y)
+  await page.getByRole('button', { name: 'Edit note' }).click(); // editing mode ON
+  await expect(body(page)).toBeVisible();
+  await page.locator('.bottompill').getByRole('button', { name: 'Back' }).click();
+  await expect(title(page)).toHaveValue('2026-07-02'); // back on X, reading view
+
+  // Tap the cross-note heading link: editing mode reroutes it into the editor.
+  await page.locator('.md a.wikilink').click();
+  await expect(body(page)).toBeVisible();
+  await expect(title(page)).toHaveValue('Basalt');
+
+  // The caret landed on "## Architecture": in live preview the cursor line keeps
+  // its raw markers, while every other heading hides theirs.
+  await expect(page.locator('.cm-line', { hasText: 'Architecture' })).toHaveText('## Architecture');
+  await expect(page.locator('.cm-line', { hasText: 'Why' }).first()).toHaveText('Why');
+});

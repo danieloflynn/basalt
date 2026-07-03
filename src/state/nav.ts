@@ -3,7 +3,7 @@ import { create } from 'zustand';
 export type Screen =
   | { name: 'empty' }
   | { name: 'note'; path: string; heading?: string }
-  | { name: 'edit'; path: string }
+  | { name: 'edit'; path: string; heading?: string }
   | { name: 'settings' }
   | { name: 'history'; path?: string }
   | { name: 'noteVersion'; path: string; oid: string; when: number }
@@ -90,7 +90,7 @@ export const useNav = create<NavState>((set, get) => ({
       // (new-note flows) are untouched, so fresh notes always open to write.
       const eff: Screen =
         s.viewMode === 'editing' && screen.name === 'note'
-          ? { name: 'edit', path: screen.path }
+          ? { name: 'edit', path: screen.path, heading: screen.heading }
           : screen;
       return {
         sidebarOpen: false,
@@ -174,6 +174,9 @@ export const useNav = create<NavState>((set, get) => ({
   },
 
   reset: () =>
+    // Clear per-vault UI state on a vault switch. searchSeed must be cleared or
+    // the previous vault's seeded tag/search query resurfaces in the new vault.
+    // (viewMode is a global pref, deliberately NOT reset here.)
     set({
       tabs: [newTabState()],
       active: 0,
@@ -181,6 +184,7 @@ export const useNav = create<NavState>((set, get) => ({
       rightSidebarOpen: false,
       sidebarView: 'files',
       overlay: 'none',
+      searchSeed: null,
     }),
 
   openSidebar: (view) =>

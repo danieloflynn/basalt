@@ -1,6 +1,7 @@
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { EditorView } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
+import { frontmatterContent, frontmatterMark } from './frontmatter';
 
 /** CodeMirror theme driven by the app's CSS variables, so it follows dark/light automatically. */
 export const basaltEditorTheme = EditorView.theme({
@@ -50,8 +51,7 @@ export const basaltEditorTheme = EditorView.theme({
   },
 });
 
-export const basaltHighlight = syntaxHighlighting(
-  HighlightStyle.define([
+export const basaltHighlightStyle = HighlightStyle.define([
     // Match the reading view (`.md h1…h6`): display font, weight, token sizes —
     // so headings don't change font when toggling live/source/reading.
     { tag: tags.heading1, fontFamily: 'var(--font-display)', fontSize: 'var(--text-2xl)', fontWeight: '580' },
@@ -66,16 +66,27 @@ export const basaltHighlight = syntaxHighlighting(
     { tag: tags.strong, fontWeight: '700' },
     { tag: tags.emphasis, fontStyle: 'italic' },
     { tag: tags.strikethrough, textDecoration: 'line-through', color: 'var(--text-faint)' },
-    { tag: tags.link, color: 'var(--link)' },
-    { tag: tags.url, color: 'var(--link)', opacity: 0.8 },
     { tag: tags.monospace, color: 'var(--ember)', fontSize: '0.9em' },
     { tag: tags.quote, color: 'var(--text-muted)', fontStyle: 'italic' },
     { tag: tags.list, color: 'var(--text-muted)' },
+    // link/url are defined AFTER list/quote ON PURPOSE. @lezer/markdown assigns
+    // BOTH tags.list and tags.link to a link inside a list item (via the
+    // "BulletList/..." descendant rule), so the two color classes land on the
+    // same span. HighlightStyle emits rules in array order and equal-specificity
+    // ties go to the LATER rule — so link must come last to stay celadon inside
+    // checkbox/list items instead of being muted to look like plain text.
+    { tag: tags.link, color: 'var(--link)' },
+    { tag: tags.url, color: 'var(--link)', opacity: 0.8 },
     { tag: tags.meta, color: 'var(--text-faint)' },
     { tag: tags.processingInstruction, color: 'var(--text-faint)' },
     { tag: tags.labelName, color: 'var(--link)' },
     { tag: tags.comment, color: 'var(--text-faint)', fontStyle: 'italic' },
     { tag: tags.keyword, color: 'var(--ember)' },
     { tag: tags.string, color: 'var(--link)' },
-  ]),
-);
+    // Frontmatter (Obsidian source-mode look): quiet, monospace — never the
+    // display face. The mono is explicit so no inherited heading style leaks in.
+    { tag: frontmatterContent, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' },
+    { tag: frontmatterMark, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' },
+  ]);
+
+export const basaltHighlight = syntaxHighlighting(basaltHighlightStyle);

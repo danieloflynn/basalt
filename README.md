@@ -1,10 +1,10 @@
 # Basalt
 
-A beautiful Android app for your markdown vault — Obsidian's feel, GitJournal's data model. Your notes stay plain markdown files in a normal git repository, synced with GitHub. No lock-in, ever.
+A beautiful Android app for your markdown vault. Your notes stay plain markdown files in a normal git repository, synced with GitHub. No lock-in, ever.
 
 ## What it does
 
-- **Reads and edits an Obsidian-style vault**: wikilinks, `![[embeds]]`, callouts, tags, tasks, frontmatter, code highlighting, tables, images.
+- **Reads and edits a standard markdown vault**: wikilinks, `![[embeds]]`, callouts, tags, tasks, frontmatter, code highlighting, tables, images.
 - **Syncs via git**: auto-commit on edit, auto-pull on open, push after a quiet period. Offline-first — everything works without a connection and syncs when you're back.
 - **Never loses data**: real merge conflicts keep both versions (your phone's copy is saved as `Note (conflict …).md`), and the on-device vault is a normal git working tree you can always recover with plain git.
 - **Feels native**: dark-first design, hardware back button, fast search, quick open, CodeMirror 6 editor with `[[` autocomplete.

@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import type { TreeFolder, TreeNode } from '@/lib/tree';
-import { noteTitle } from '@/lib/paths';
+import { dirname, isMarkdownPath, noteTitle } from '@/lib/paths';
 import {
   useSettings,
   useVault,
@@ -23,6 +23,7 @@ import {
 import { Dialog } from '@/ui/components/Dialog';
 import { FileActionsSheet } from '@/ui/components/FileActionsSheet';
 import { SyncStatus } from '@/ui/components/SyncStatus';
+import { defaultNewNoteFolder } from '@/ui/templates';
 import { VaultMenu } from './VaultMenu';
 
 const VIEWS: {
@@ -128,8 +129,22 @@ export function Sidebar({ open }: { open: boolean }) {
 }
 
 // ---------------------------------------------------------------------------
-// Files — collapsible tree, active note highlighted
+// Files — collapsible tree, active note highlighted, long-press drag to move
 // ---------------------------------------------------------------------------
+
+/** An armed/live note drag: ghost under the finger, folders as drop targets. */
+interface TreeDrag {
+  /** Path of the file being dragged. */
+  path: string;
+  /** Its home folder — dropping back there is a no-op, so it never highlights. */
+  home: string;
+  title: string;
+  /** Folder under the finger ('' = vault root); null = nothing droppable. */
+  target: string | null;
+  /** Finger position at arm time, so the ghost's first paint is placed. */
+  x: number;
+  y: number;
+}
 
 function FilesPanel() {
   const tree = useVault((s) => s.tree);
@@ -139,13 +154,132 @@ function FilesPanel() {
   const [actionTarget, setActionTarget] = useState<TreeNode | null>(null);
   const [creatingFolder, setCreatingFolder] = useState(false);
   const creatingNote = useRef(false);
+  const [drag, setDrag] = useState<TreeDrag | null>(null);
+  const ghostRef = useRef<HTMLDivElement>(null);
+  // One tree drag at a time — guards against two fingers each arming a drag.
+  const dragging = useRef(false);
+
+  /**
+   * A note row's long-press armed: from here the finger owns the touch.
+   * Releasing in place keeps the old behavior (the actions sheet); moving
+   * drags a ghost across the tree — folders highlight as drop targets, the
+   * panel auto-scrolls near its edges, and dropping on a folder (or the root
+   * area) moves the file there. `data-tree-drag` tells DrawerGestures to keep
+   * its hands off this touch; document-level listeners (passive: false, like
+   * DrawerGestures) let us preventDefault the scroll React's handlers can't.
+   */
+  const beginDrag = (node: TreeNode, startX: number, startY: number, pointerId: number) => {
+    // A second finger's 450ms hold must not arm a rival drag whose own onEnd
+    // would also commit a move — one drag owns the tree at a time.
+    if (dragging.current) return;
+    dragging.current = true;
+    const home = dirname(node.path);
+    document.documentElement.setAttribute('data-tree-drag', '');
+    const s = { x: startX, y: startY, moved: false, target: home as string | null, raf: 0 };
+
+    // Follow only the finger that armed this drag; a second finger landing
+    // mid-drag must not move the ghost or decide where the note lands.
+    const mine = (list: TouchList): Touch | undefined =>
+      Array.prototype.find.call(list, (t: Touch) => t.identifier === pointerId) as
+        | Touch
+        | undefined;
+
+    const findTarget = (): string | null => {
+      const el = document.elementFromPoint(s.x, s.y);
+      // Folder rows target themselves; file rows target their parent folder
+      // (dropping "onto a note" reads as "into its folder").
+      const row = el?.closest<HTMLElement>('[data-drop-folder]');
+      if (row) return row.dataset.dropFolder ?? '';
+      return el?.closest('.filetree, .sidebar .sidebar__content') ? '' : null;
+    };
+
+    // One rAF loop for the whole drag: it pins the ghost to the finger,
+    // auto-scrolls while the finger DWELLS near an edge (no move events fire
+    // then, so a move-driven version would stall), and re-aims the target.
+    const step = () => {
+      s.raf = requestAnimationFrame(step);
+      const ghost = ghostRef.current;
+      if (ghost) ghost.style.transform = ghostTransform(s.x, s.y);
+      const scroller = document.querySelector<HTMLElement>('.sidebar .sidebar__content');
+      if (scroller && s.moved) {
+        const r = scroller.getBoundingClientRect();
+        if (s.y < r.top + 56) scroller.scrollTop -= 7;
+        else if (s.y > r.bottom - 96) scroller.scrollTop += 7;
+      }
+      const target = s.moved ? findTarget() : home;
+      if (target !== s.target) {
+        s.target = target;
+        setDrag((d) => (d ? { ...d, target } : d));
+      }
+    };
+
+    const finish = () => {
+      cancelAnimationFrame(s.raf);
+      document.removeEventListener('touchmove', onMove);
+      document.removeEventListener('touchend', onEnd);
+      document.removeEventListener('touchcancel', onCancel);
+      document.documentElement.removeAttribute('data-tree-drag');
+      dragging.current = false;
+      setDrag(null);
+    };
+
+    const onMove = (e: TouchEvent) => {
+      const t = mine(e.touches);
+      if (!t) return;
+      e.preventDefault(); // the note owns this touch — no scrolling under it
+      if (Math.hypot(t.clientX - startX, t.clientY - startY) > 6) s.moved = true;
+      s.x = t.clientX;
+      s.y = t.clientY;
+    };
+
+    const onEnd = (e: TouchEvent) => {
+      // Commit only when OUR finger lifts (or the whole gesture ends); another
+      // finger's touchend must not drop this note at the first finger's
+      // position. Empty changedTouches = a wholesale release, which is ours.
+      if (e.changedTouches?.length && !mine(e.changedTouches)) return;
+      // Cancel the touchend or the browser synthesizes a click at the finger —
+      // it would land on whatever we render next (the sheet's scrim!) or, after
+      // a drop, on the folder row under the ghost, and undo what we just did.
+      if (e.cancelable) e.preventDefault();
+      const { moved, target } = s;
+      finish();
+      if (!moved) {
+        setActionTarget(node); // press-and-release: the actions sheet, as ever
+        return;
+      }
+      if (target === null || target === home) return; // dropped nowhere / back home
+      void (async () => {
+        const to = await vaultService.moveFile(node.path, target);
+        if (to !== node.path) useNav.getState().renamePath(node.path, to);
+      })();
+    };
+
+    // Our finger being cancelled (or a wholesale cancel) ends the drag; a
+    // stray cancel naming a different finger leaves ours running.
+    const onCancel = (e: TouchEvent) => {
+      if (!e.changedTouches?.length || mine(e.changedTouches)) finish();
+    };
+
+    document.addEventListener('touchmove', onMove, { passive: false });
+    document.addEventListener('touchend', onEnd);
+    document.addEventListener('touchcancel', onCancel);
+    setDrag({
+      path: node.path,
+      home,
+      title: isMarkdownPath(node.path) ? noteTitle(node.path) : node.name,
+      target: home,
+      x: startX,
+      y: startY,
+    });
+    s.raf = requestAnimationFrame(step);
+  };
 
   // Obsidian: new note opens the editor on "Untitled" — no naming dialog.
   const newNote = async () => {
     if (creatingNote.current) return; // double-tap guard
     creatingNote.current = true;
     try {
-      const path = await vaultService.createNote('', 'Untitled');
+      const path = await vaultService.createNote(defaultNewNoteFolder(), 'Untitled');
       useNav.getState().push({ name: 'edit', path });
     } finally {
       creatingNote.current = false;
@@ -162,7 +296,10 @@ function FilesPanel() {
   };
 
   return (
-    <div className="filetree">
+    <div
+      className="filetree"
+      data-drop-root={(drag && drag.target === '' && drag.home !== '') || undefined}
+    >
       <div className="filetree__toolbar">
         <button
           className="iconbtn"
@@ -187,7 +324,19 @@ function FilesPanel() {
         collapsed={collapsed}
         onToggle={toggle}
         onLongPress={setActionTarget}
+        onArm={beginDrag}
+        drag={drag}
       />
+
+      {drag && (
+        <div
+          className="tree-drag-ghost"
+          ref={ghostRef}
+          style={{ transform: ghostTransform(drag.x, drag.y) }}
+        >
+          <span className="tree-row__name">{drag.title}</span>
+        </div>
+      )}
 
       {actionTarget && (
         <FileActionsSheet node={actionTarget} onClose={() => setActionTarget(null)} />
@@ -210,18 +359,27 @@ function FilesPanel() {
   );
 }
 
+/** Ghost sits beside the finger, floated up so the fingertip doesn't hide it. */
+function ghostTransform(x: number, y: number): string {
+  return `translate(${x + 12}px, ${y - 52}px)`;
+}
+
 function TreeLevel({
   folder,
   depth,
   collapsed,
   onToggle,
   onLongPress,
+  onArm,
+  drag,
 }: {
   folder: TreeFolder;
   depth: number;
   collapsed: Set<string>;
   onToggle: (path: string) => void;
   onLongPress: (node: TreeNode) => void;
+  onArm: (node: TreeNode, x: number, y: number, id: number) => void;
+  drag: TreeDrag | null;
 }) {
   const sortOrder = useSettings((s) => s.settings.sortOrder);
   const files = useVault((s) => s.files);
@@ -250,6 +408,8 @@ function TreeLevel({
             collapsed={collapsed}
             onToggle={onToggle}
             onLongPress={onLongPress}
+            onArm={onArm}
+            drag={drag}
           />
         ) : (
           <FileRow
@@ -258,6 +418,8 @@ function TreeLevel({
             depth={depth}
             active={node.path === activePath}
             onLongPress={onLongPress}
+            onArm={onArm}
+            drag={drag}
           />
         ),
       )}
@@ -265,28 +427,98 @@ function TreeLevel({
   );
 }
 
+/**
+ * Movement past this before the 450ms hold completes reads as a scroll, so it
+ * cancels the press. Shared by folder rows (useLongPress) and file rows
+ * (usePressDrag) — fingers are never perfectly still, so a zero-tolerance
+ * cancel makes long-press feel broken.
+ */
+const PRESS_SLOP = 8;
+
 function useLongPress(fire: () => void) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fired = useRef(false);
+  const start = useRef({ x: 0, y: 0 });
   return {
     fired,
     handlers: {
-      onTouchStart: () => {
+      onTouchStart: (e: React.TouchEvent) => {
+        const t = e.touches[0];
+        if (t) start.current = { x: t.clientX, y: t.clientY };
         fired.current = false;
         timer.current = setTimeout(() => {
+          timer.current = null;
           fired.current = true;
           fire();
         }, 450);
       },
-      onTouchMove: () => {
-        if (timer.current) clearTimeout(timer.current);
+      onTouchMove: (e: React.TouchEvent) => {
+        const t = e.touches[0];
+        if (!timer.current || !t) return;
+        if (Math.hypot(t.clientX - start.current.x, t.clientY - start.current.y) > PRESS_SLOP) {
+          clearTimeout(timer.current);
+          timer.current = null;
+        }
       },
       onTouchEnd: () => {
         if (timer.current) clearTimeout(timer.current);
+        timer.current = null;
       },
       onContextMenu: (e: React.MouseEvent) => {
         e.preventDefault();
         fire();
+      },
+    },
+  };
+}
+
+/**
+ * File rows: a long-press ARMS the drag layer instead of opening the sheet
+ * outright — beginDrag then decides between release (actions sheet, the old
+ * behavior) and move (drag). Pre-arm jitter under 8px keeps the timer alive
+ * (fingers are never perfectly still); a real scroll kills it, as before.
+ * Desktop right-click skips straight to the sheet — there is no drag there.
+ */
+function usePressDrag(arm: (x: number, y: number, id: number) => void, sheet: () => void) {
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fired = useRef(false);
+  const start = useRef({ x: 0, y: 0, id: -1 });
+  const touched = useRef(false);
+  return {
+    fired,
+    handlers: {
+      onTouchStart: (e: React.TouchEvent) => {
+        const t = e.touches[0];
+        touched.current = true;
+        start.current = { x: t.clientX, y: t.clientY, id: t.identifier };
+        fired.current = false;
+        timer.current = setTimeout(() => {
+          timer.current = null;
+          fired.current = true;
+          arm(start.current.x, start.current.y, start.current.id);
+        }, 450);
+      },
+      onTouchMove: (e: React.TouchEvent) => {
+        const t = e.touches[0];
+        if (!timer.current || !t) return;
+        if (Math.hypot(t.clientX - start.current.x, t.clientY - start.current.y) > PRESS_SLOP) {
+          clearTimeout(timer.current);
+          timer.current = null;
+        }
+      },
+      onTouchEnd: () => {
+        if (timer.current) clearTimeout(timer.current);
+        timer.current = null;
+      },
+      onContextMenu: (e: React.MouseEvent) => {
+        e.preventDefault();
+        // Android raises `contextmenu` from a long-press ~500ms in, racing the
+        // drag we ARM at 450ms — opening the sheet here would abort the drag
+        // ("dragging opens the options menu"). On touch the sheet is reached by
+        // arming then releasing in place (see beginDrag); only a real mouse
+        // right-click, which never fires touchstart, opens it from here.
+        if (touched.current) return;
+        sheet();
       },
     },
   };
@@ -298,21 +530,29 @@ function FolderRow({
   collapsed,
   onToggle,
   onLongPress,
+  onArm,
+  drag,
 }: {
   node: TreeFolder;
   depth: number;
   collapsed: Set<string>;
   onToggle: (path: string) => void;
   onLongPress: (n: TreeNode) => void;
+  onArm: (n: TreeNode, x: number, y: number, id: number) => void;
+  drag: TreeDrag | null;
 }) {
   const isCollapsed = collapsed.has(node.path);
+  // Folders aren't draggable (v1) — long-press keeps opening the sheet directly.
   const { handlers, fired } = useLongPress(() => onLongPress(node));
+  // Drop target under the dragged note's finger — never its own home folder.
+  const isDrop = drag !== null && drag.target === node.path && drag.home !== node.path;
 
   return (
     <>
       <button
-        className="tree-row tree-row--folder"
+        className={isDrop ? 'tree-row tree-row--folder tree-row--drop' : 'tree-row tree-row--folder'}
         style={{ paddingLeft: 10 + depth * 18 }}
+        data-drop-folder={node.path}
         {...handlers}
         onClick={() => {
           if (!fired.current) onToggle(node.path);
@@ -332,6 +572,8 @@ function FolderRow({
           collapsed={collapsed}
           onToggle={onToggle}
           onLongPress={onLongPress}
+          onArm={onArm}
+          drag={drag}
         />
       )}
     </>
@@ -343,18 +585,30 @@ function FileRow({
   depth,
   active,
   onLongPress,
+  onArm,
+  drag,
 }: {
   node: TreeNode;
   depth: number;
   active: boolean;
   onLongPress: (n: TreeNode) => void;
+  onArm: (n: TreeNode, x: number, y: number, id: number) => void;
+  drag: TreeDrag | null;
 }) {
-  const { handlers, fired } = useLongPress(() => onLongPress(node));
+  const { handlers, fired } = usePressDrag(
+    (x, y, id) => onArm(node, x, y, id),
+    () => onLongPress(node),
+  );
   const isMd = node.path.toLowerCase().endsWith('.md');
+  const classes = ['tree-row'];
+  if (active) classes.push('tree-row--active');
+  if (drag?.path === node.path) classes.push('tree-row--drag-source');
   return (
     <button
-      className={active ? 'tree-row tree-row--active' : 'tree-row'}
+      className={classes.join(' ')}
       style={{ paddingLeft: 28 + depth * 18 }}
+      // Dropping on a note reads as "into its folder" — target the parent.
+      data-drop-folder={dirname(node.path)}
       {...handlers}
       onClick={() => {
         if (fired.current || !isMd) return;
@@ -544,7 +798,7 @@ function BookmarksPanel() {
   if (bookmarks.length === 0) {
     return (
       <p className="state__hint" style={{ padding: '24px 16px' }}>
-        Bookmark notes from the note menu and they'll gather here (synced with desktop Obsidian).
+        Bookmark notes from the note menu and they'll gather here (synced across your devices).
       </p>
     );
   }

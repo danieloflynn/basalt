@@ -13,10 +13,18 @@ export default function MermaidBlock({ source }: { source: string }) {
     void (async () => {
       try {
         const { default: mermaid } = await import('mermaid');
+        // Mermaid's default edge-label "chip" is a pale rectangle that reads as
+        // foreign on either theme. Repaint it with the app's surface token so the
+        // labels sit on-palette (the label text keeps the theme's own textColor,
+        // which is already legible against the note background).
+        const surface = getComputedStyle(document.documentElement)
+          .getPropertyValue('--surface')
+          .trim();
         mermaid.initialize({
           startOnLoad: false,
           theme: document.documentElement.dataset.theme === 'light' ? 'neutral' : 'dark',
           securityLevel: 'strict',
+          themeVariables: surface ? { edgeLabelBackground: surface } : undefined,
         });
         const { svg } = await mermaid.render(idRef.current, source);
         if (!cancelled) setSvg(svg);

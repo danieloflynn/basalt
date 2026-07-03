@@ -780,6 +780,9 @@
 .workspace-top__group {
   display: flex;
   align-items: center;
+  /* Centers the glyph when the group IS a single icon button (sidebar toggle,
+     back buttons); a no-op for multi-button groups, which size to content. */
+  justify-content: center;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 999px;
@@ -832,18 +835,38 @@ textarea.inline-title::placeholder {
   color: var(--text-faint);
 }
 
+/* Sits above the drawers (40), their scrims (39), sheets/dialogs (30–32) and
+   the vault overlays (45–50) so a sync failure is always visible and reachable.
+   The layer itself is pointer-transparent — only the banner strip takes taps —
+   so a dismissed/failed sync never leaves an invisible tap-blocker behind. */
 .banners-layer {
   position: fixed;
   top: calc(var(--safe-top) + 54px);
   left: 0;
   right: 0;
-  z-index: 25;
+  z-index: 55;
   pointer-events: none;
 }
 
 .banners-layer .banner {
   pointer-events: auto;
   box-shadow: var(--shadow-raised);
+}
+
+/* Compact dismiss control on a banner (e.g. the sync-error notice). */
+.banner__dismiss {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  margin: -4px -4px -4px 0;
+  border-radius: var(--r-sm);
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.banner__dismiss:active {
+  background: var(--surface-press);
 }
 
 /* ---------- Bottom pill ---------- */
@@ -929,8 +952,8 @@ textarea.inline-title::placeholder {
  */
 .sidebar {
   position: fixed;
+  /* Full-width drawer: covers the workspace edge to edge when open. */
   inset: 0;
-  right: 52px;
   z-index: 40;
   display: flex;
   flex-direction: column;
@@ -965,8 +988,79 @@ textarea.inline-title::placeholder {
 
 /* Mid-drag the finger owns the position — no easing fighting it. */
 [data-drawer-drag] .sidebar,
-[data-drawer-drag] .scrim--sidebar {
+[data-drawer-drag] .scrim--sidebar,
+[data-drawer-drag] .sidebar-right,
+[data-drawer-drag] .scrim--rightbar {
   transition: none !important;
+}
+
+/* ---------- Right sidebar (backlinks) — mirror of .sidebar ---------- */
+
+.sidebar-right {
+  position: fixed;
+  /* Full-width drawer: covers the workspace edge to edge when open. */
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+  padding-top: var(--safe-top);
+  transform: translateX(102%);
+  visibility: hidden;
+  transition:
+    transform 200ms var(--ease),
+    visibility 0s linear 200ms;
+}
+
+.sidebar-right[data-open] {
+  transform: none;
+  visibility: visible;
+  transition: transform 200ms var(--ease);
+}
+
+.scrim--rightbar {
+  z-index: 39;
+  animation: none;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms var(--ease);
+}
+
+.scrim--rightbar[data-open] {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Rows keep their own 12px inset — head/section share it so text lines up. */
+.rightbar__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 14px 12px 8px;
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: 580;
+}
+
+.rightbar__count {
+  font-size: var(--text-xs);
+  font-weight: 550;
+  color: var(--text-faint);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.rightbar__section {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  padding: 8px 12px 4px;
 }
 
 .sidebar__content {
@@ -1042,7 +1136,6 @@ textarea.inline-title::placeholder {
   align-items: center;
   gap: 6px;
   padding: 8px 10px calc(10px + var(--safe-bottom));
-  border-top: 1px solid var(--border);
   background: var(--bg);
 }
 
@@ -1169,9 +1262,10 @@ textarea.inline-title::placeholder {
   background: var(--surface-press);
 }
 
+/* Active note: a full-width rounded-pill fill (no accent stripe). The row
+   already carries --r-lg corners, so the lighter surface reads as a pill. */
 .tree-row--active {
-  background: var(--surface-raised);
-  box-shadow: inset 2px 0 0 var(--ember);
+  background: var(--surface-press);
 }
 
 .tree-row--folder {
@@ -1207,6 +1301,51 @@ textarea.inline-title::placeholder {
   font-size: var(--text-xs);
   color: var(--text-faint);
   text-transform: uppercase;
+}
+
+/* ---- Drag-and-drop (long-press a note, then move) ---- */
+
+/* Floating copy of the row that follows the finger. */
+.tree-drag-ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 60;
+  max-width: 60vw;
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 8px 14px;
+  border-radius: var(--r-lg);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-raised);
+  font-size: var(--text-md);
+  opacity: 0.95;
+  pointer-events: none; /* elementFromPoint must see through it */
+  will-change: transform;
+}
+
+/* The folder under the finger. */
+.tree-row--drop {
+  background: var(--surface-press);
+  box-shadow: inset 0 0 0 1.5px var(--ember);
+}
+
+/* The row being dragged stays home, dimmed, until the move lands. */
+.tree-row--drag-source {
+  opacity: 0.35;
+}
+
+/* Dropping on the tree itself (not a folder) files the note at the root. */
+.filetree[data-drop-root] {
+  box-shadow: inset 0 0 0 1.5px var(--ember);
+  border-radius: var(--r-lg);
+}
+
+/* Mid-drag, row press styling would read as taps — silence it. */
+[data-tree-drag] .tree-row:active {
+  background: transparent;
 }
 
 /* ---------- Quick open / palette ---------- */
@@ -1308,4 +1447,156 @@ textarea.inline-title::placeholder {
 
 .cm-searchMatch {
   background: var(--ember-soft) !important;
+}
+
+/* ---------- Graph settings panel ---------- */
+
+.graph-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 31;
+  display: flex;
+  flex-direction: column;
+  width: min(340px, 88vw);
+  background: var(--surface-raised);
+  border-left: 1px solid var(--border);
+  box-shadow: var(--shadow-raised);
+  animation: graph-panel-in var(--dur) var(--ease);
+}
+
+@keyframes graph-panel-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: none;
+  }
+}
+
+.graph-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: calc(10px + var(--safe-top)) 8px 10px 16px;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-display);
+  font-size: var(--text-md);
+  color: var(--text);
+  flex-shrink: 0;
+}
+
+.graph-panel__scroll {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: calc(24px + var(--safe-bottom));
+}
+
+.graph-panel__section {
+  border-bottom: 1px solid var(--border);
+}
+
+.graph-panel__section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 16px;
+  text-align: left;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.graph-panel__section-head svg {
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+
+.graph-panel__body {
+  padding: 0 16px 14px;
+}
+
+.graph-panel__search {
+  margin-bottom: 6px;
+}
+
+.graph-panel__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  margin-top: 8px;
+  padding: 0 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: 550;
+}
+
+.graph-panel__btn:active {
+  background: var(--surface-press);
+}
+
+.graph-panel__btn .row__icon {
+  color: inherit;
+  opacity: 0.8;
+}
+
+.graph-group-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.graph-group-row .dialog__input {
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+  font-size: var(--text-sm);
+}
+
+.graph-group-row .iconbtn {
+  width: 36px;
+  height: 36px;
+}
+
+.graph-swatch {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid var(--surface-raised);
+  box-shadow: 0 0 0 1px var(--border-strong);
+  flex-shrink: 0;
+}
+
+.graph-slider {
+  padding: 8px 0;
+}
+
+.graph-slider + .graph-slider {
+  border-top: 1px solid var(--border);
+}
+
+.graph-slider__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.graph-slider input[type='range'] {
+  width: 100%;
+  accent-color: var(--ember);
+  height: 20px;
 }

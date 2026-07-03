@@ -14,13 +14,16 @@ Navigation is per-tab history with back AND forward (`src/state/nav.ts`).
 
 - `npm run dev` — browser dev (mock git engine + demo vault auto-loads after fake onboarding)
 - `npm test` — vitest (domain layer: `src/lib/lib.test.ts`, `src/state/nav.test.ts`)
-- `npm run test:visual` — Playwright suite (`tests/visual/`): screenshot specs,
-  gesture specs, and `flows.spec.ts` (integration: note creation + inline-title
-  rename, all entry points). Baselines in `tests/visual/__screenshots__` are
-  committed. After an intentional UI change run `npm run test:visual:update`
-  and eyeball the changed PNGs. Beware: a small text change can sit inside the
-  0.002 diff tolerance, so `--update-snapshots` won't rewrite the PNG — delete
-  the stale baseline to force regeneration.
+- `npm run test:visual` — Playwright suite (`tests/visual/`): screenshot specs
+  (`visual.spec.ts`), gestures (drawers, pull-down, DnD in `gestures.spec.ts` /
+  `dnd.spec.ts`), integration flows (`flows.spec.ts` creation+rename+templates,
+  `editor.spec.ts` live-preview/mode, `toolbar.spec.ts`, `graph.spec.ts`).
+  Retries are 0 on purpose — a flaky test is a bug; fix the wait, don't retry.
+  Baselines in `tests/visual/__screenshots__` are committed. After an intentional UI change
+  run `npm run test:visual:update` and eyeball the changed PNGs. Beware: a
+  small text change can sit inside the 0.002 diff tolerance, so
+  `--update-snapshots` won't rewrite the PNG — delete the stale baseline to
+  force regeneration.
 - `npm run build` — `tsc --noEmit` then vite build (keep it green)
 - `npm run sync` — build + `cap sync android`
 - Android build: `cd android && JAVA_HOME=$HOME/.local/java/jdk-21.0.11+10/Contents/Home ./gradlew assembleDebug`
@@ -60,10 +63,23 @@ sync indicator (`.sync-columns`) that glows ember while syncing.
 - Task checkbox toggling maps rendered-line → source-line via node positions;
   frontmatter offset is added in `NoteScreen` (`fmLineOffset`).
 - Touch gestures: pure math in `src/lib/gesture.ts` (unit-tested), DOM layer in
-  `src/ui/workspace/DrawerGestures.tsx`. The sidebar is ALWAYS mounted —
-  `data-open` drives CSS transitions, drags scrub the transform inline. Don't
-  go back to conditional mounting; the gesture layer depends on the element
-  existing.
+  `src/ui/workspace/DrawerGestures.tsx` — a side-agnostic `installDrawer(side)`
+  instantiated for the LEFT (files) and RIGHT (backlinks) drawers. BOTH drawers
+  are ALWAYS mounted — `data-open` drives CSS transitions, drags scrub the
+  transform inline. Don't go back to conditional mounting. The settle path is
+  deliberately synchronous (flushSync, rAF cancelled, no timers) — drags used
+  to strand the drawer halfway; see the regression tests in gestures.spec.ts
+  before touching it.
+- View mode is GLOBAL (`nav.viewMode`, Obsidian's universal reading/editing
+  toggle): `push()` reroutes note opens to the editor when 'editing'; persisted
+  as `defaultView` in settings, hydrated in App.tsx. Explicit `edit` pushes
+  (new-note flows) bypass it.
+- Moving a file = `vaultService.moveFile` (dedupes, rewrites folder-qualified
+  inbound wikilinks BEFORE renameFile — same ordering rule as renameByTitle:
+  rewrite while the resolver still knows the old path). Tree drag-and-drop in
+  Sidebar.tsx: press-and-hold-then-move drags (sets `data-tree-drag` on <html>,
+  which the drawer gesture layer treats as a claim); press-and-release still
+  opens the file actions sheet.
 - Edit screen: the format toolbar renders only while the editor has focus
   (`nav.editorFocused`), and the bottom pill hides then — they share the same
   bottom space and used to collide.
@@ -82,3 +98,31 @@ sync indicator (`.sync-columns`) that glows ember while syncing.
   `discard`) assumes markdown files are in it. Membership checks go through
   `search.has()`, never the notes map (it's rebuilt from file listings and
   lies about index membership).
+- **Every mutating vault op is serialized** through an internal lock in
+  VaultService (public wrappers acquire it; unlocked `*Impl`/`*Plain` helpers
+  call each other — a locked reentrant call deadlocks). `writeNote` is
+  write-through (cache updated before the disk write), and `renameFile` throws
+  if the destination exists. Don't add a mutating public method without the
+  lock, and don't call a public mutator from inside an Impl.
+- **UI rename/move goes through the safe APIs only**: `renameByTitle` /
+  `moveFile` / `renameFolder` (dedupe + sanitize + vault-wide link rewrite +
+  bookmark/recents migration), preceded by `flushActiveEditor()`
+  (`src/lib/editorFlush.ts` — EditScreen registers its flush there) and
+  followed by `nav.renamePath`. Raw `renameFile` from UI destroyed notes once;
+  never again. Titles are sanitized centrally (`sanitizeNoteTitle` in
+  paths.ts) — `| # [ ] ^ \ / :` and leading dots corrupt links or hide files.
+- Editor frontmatter is a Lezer block parser (`src/ui/editor/frontmatter.ts`)
+  that must decide from the raw input BEFORE consuming lines — @lezer/markdown
+  never rewinds a false return after nextLine(). Fences are exactly `---`.
+- livePreview's regex passes are syntax-tree gated (SKIP_NODES: code,
+  frontmatter, math) — any new pass must check `inSkip()` or it will style
+  code-fence contents.
+- Drawers are FULL-WIDTH when open (no 52px gutter). Graph view: config lives
+  in `settings.graph` (`GraphConfig` from `src/ui/graph/config.ts`), pure model
+  in `src/ui/graph/model.ts`; tests drive positions via the dev-only
+  `window.__graphDebug` hook.
+- Templates: folder setting `templateFolder` (default `templates`, matched
+  case-sensitively); palette "Insert template" hands off through
+  `useTemplateHandoff` (src/ui/templates.ts), drained by an EditScreen effect.
+- Note embeds are hoisted out of host paragraphs by `rehypeHoistEmbeds`
+  (block cards inside `<p>` are invalid nesting) — media embeds stay inline.

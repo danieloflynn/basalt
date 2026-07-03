@@ -36,9 +36,10 @@ export const IconSearch = (p: P) => (
 );
 
 export const IconSettings = (p: P) => (
+  // A real cog — teeth around the rim and a hollow hub — not a sun of spokes.
   <I {...p}>
+    <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2Z" />
     <circle cx="12" cy="12" r="3" />
-    <path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1" />
   </I>
 );
 
@@ -265,6 +266,13 @@ export const IconGraph = (p: P) => (
     <circle cx="17" cy="17.5" r="2.5" />
     <circle cx="6" cy="18" r="2" />
     <path d="M7.8 7.4 15.3 16M7.9 6.5 16 5.4M7.4 16.9l7.2.5" />
+  </I>
+);
+
+export const IconWand = (p: P) => (
+  // A magic wand with a sparkle — the graph timelapse trigger.
+  <I {...p}>
+    <path d="M15 4V2M15 16v-2M8 9h2M20 9h2M17.8 11.8 19 13M17.8 6.2 19 5M3 21l9-9M12.2 6.2 11 5" />
   </I>
 );
 

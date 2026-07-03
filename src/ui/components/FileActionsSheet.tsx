@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { dirname, joinPath, noteTitle } from '@/lib/paths';
+import { flushActiveEditor } from '@/lib/editorFlush';
+import { dirname, noteTitle } from '@/lib/paths';
 import type { TreeNode } from '@/lib/tree';
 import { vaultService } from '@/services';
 import { useNav } from '@/state/nav';
@@ -20,20 +21,21 @@ export function FileActionsSheet({ node, onClose }: { node: TreeNode; onClose: (
         confirmLabel="Rename"
         onCancel={onClose}
         onConfirm={async (name) => {
-          const clean = name.trim().replace(/[\\/:]/g, '-');
-          if (clean && clean !== displayName) {
-            const dir = dirname(node.path);
-            const to = isFolder ? joinPath(dir, clean) : joinPath(dir, `${clean}.md`);
-            if (isFolder) {
-              // Folder rename = rename every file under it (git-friendly).
-              for (const f of collectPaths(node)) {
-                await vaultService.renameFile(f, to + f.slice(node.path.length));
-              }
-            } else {
-              await vaultService.renameFile(node.path, to);
-            }
-          }
           onClose();
+          const clean = name.trim();
+          if (!clean || clean === displayName) return;
+          await flushActiveEditor();
+          const nav = useNav.getState();
+          if (isFolder) {
+            // Safe folder rename (sibling dedupe, hidden files, inbound link
+            // rewrite, bookmark migration); repoint history per moved file.
+            const moves = await vaultService.renameFolder(node.path, clean);
+            for (const { from, to } of moves) nav.renamePath(from, to);
+          } else {
+            // Safe note rename (sanitize/dedupe/link-rewrite/bookmark migration).
+            const finalPath = await vaultService.renameByTitle(node.path, clean);
+            if (finalPath !== node.path) nav.renamePath(node.path, finalPath);
+          }
         }}
       />
     );
@@ -115,12 +117,4 @@ export function FileActionsSheet({ node, onClose }: { node: TreeNode; onClose: (
       </div>
     </>
   );
-}
-
-function* collectPaths(node: TreeNode): Generator<string> {
-  if (node.kind === 'file') {
-    yield node.path;
-    return;
-  }
-  for (const child of node.children) yield* collectPaths(child);
 }

@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { basename, dirname, joinPath, noteTitle } from '@/lib/paths';
+import { flushActiveEditor } from '@/lib/editorFlush';
+import { dirname, noteTitle } from '@/lib/paths';
 import { useVault, vaultService } from '@/services';
 import { useNav } from '@/state/nav';
 import {
@@ -40,13 +41,12 @@ export function NoteMenu({ path, onClose }: { path: string; onClose: () => void 
         confirmLabel="Rename"
         onCancel={onClose}
         onConfirm={async (name) => {
-          const clean = name.trim().replace(/[\\/:]/g, '-');
           onClose();
-          if (clean && clean !== noteTitle(path)) {
-            const to = joinPath(dirname(path), `${clean}.md`);
-            await vaultService.renameFile(path, to);
-            nav.replace({ name: 'note', path: to });
-          }
+          // Safe rename: sanitize/dedupe, vault-wide wikilink rewrite, bookmark
+          // migration — then repoint every tab's history to the final path.
+          await flushActiveEditor();
+          const finalPath = await vaultService.renameByTitle(path, name);
+          if (finalPath !== path) nav.renamePath(path, finalPath);
         }}
       />
     );
@@ -58,12 +58,12 @@ export function NoteMenu({ path, onClose }: { path: string; onClose: () => void 
         title={`Move "${noteTitle(path)}" to…`}
         onClose={onClose}
         onPick={async (folder) => {
-          const to = joinPath(folder, basename(path));
           onClose();
-          if (to !== path) {
-            await vaultService.renameFile(path, to);
-            nav.replace({ name: 'note', path: to });
-          }
+          // Safe move: dedupe + folder-qualified inbound link rewrite + bookmark
+          // migration; renamePath keeps other tabs pointed at the note.
+          await flushActiveEditor();
+          const finalPath = await vaultService.moveFile(path, folder);
+          if (finalPath !== path) nav.renamePath(path, finalPath);
         }}
       />
     );

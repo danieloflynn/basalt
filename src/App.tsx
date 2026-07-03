@@ -19,8 +19,10 @@ import { NoteVersionScreen } from '@/ui/screens/NoteVersionScreen';
 import { OnboardingScreen } from '@/ui/screens/OnboardingScreen';
 import { SettingsScreen } from '@/ui/screens/SettingsScreen';
 import { BottomPill } from '@/ui/workspace/BottomPill';
+import { defaultNewNoteFolder } from '@/ui/templates';
 import { SidebarToggle } from '@/ui/workspace/chrome';
 import { DrawerGestures } from '@/ui/workspace/DrawerGestures';
+import { RightSidebar } from '@/ui/workspace/RightSidebar';
 import { Sidebar } from '@/ui/workspace/Sidebar';
 import { usePullDown } from '@/ui/hooks/usePullDown';
 import './styles/tokens.css';
@@ -38,6 +40,7 @@ export function App() {
   const [boot, setBoot] = useState<Boot>('loading');
   const nav = useNav();
   const sidebarOpen = useNav((s) => s.sidebarOpen);
+  const rightSidebarOpen = useNav((s) => s.rightSidebarOpen);
   const theme = useSettings((s) => s.settings.theme);
   const fontScale = useSettings((s) => s.settings.fontScale);
 
@@ -141,6 +144,7 @@ export function App() {
       </div>
       {showPill && <BottomPill />}
       <SidebarLayer open={sidebarOpen} />
+      <RightSidebar open={rightSidebarOpen} />
       <DrawerGestures />
     </div>
   );
@@ -223,7 +227,7 @@ function EmptyView() {
           <button
             className="btn btn--primary"
             onClick={async () => {
-              const path = await vaultService.createNote('', 'Untitled');
+              const path = await vaultService.createNote(defaultNewNoteFolder(), 'Untitled');
               nav.push({ name: 'edit', path });
             }}
           >

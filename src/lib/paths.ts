@@ -70,6 +70,27 @@ export function noteTitle(p: string): string {
   return stripExt(basename(p));
 }
 
+/**
+ * Sanitize a user-typed note title into a safe filename stem (no extension).
+ *
+ * Strips a typed `.md`, replaces filesystem-illegal AND wikilink-breaking
+ * characters (`\ / : | # [ ] ^`) with '-', and removes leading dots so a title
+ * like `.draft` or `.` can never become a hidden path (`.draft.md` / `..md`,
+ * which vanish from the tree and silently drop autosaves). Empty / dot-only
+ * results fall back to 'Untitled'. This is the single choke point every note
+ * name flows through (createNote + renameByTitle).
+ */
+export function sanitizeNoteTitle(raw: string): string {
+  const cleaned = raw
+    .replace(/\.md$/i, '')
+    .replace(/[\\/:|#[\]^]/g, '-')
+    .trim()
+    .replace(/^\.+/, '')
+    .trim();
+  if (!cleaned || cleaned === '.' || cleaned === '..') return 'Untitled';
+  return cleaned;
+}
+
 /** True for paths that should be hidden from browsing (.git, .obsidian, .trash …). */
 export function isHiddenPath(p: string): boolean {
   return p.split('/').some((part) => part.startsWith('.'));

@@ -27,6 +27,7 @@ import { IconCheck, IconImage, IconNote } from '@/ui/icons';
 import {
   rehypeCallouts,
   rehypeHeadingAnchors,
+  rehypeHoistEmbeds,
   rehypeSpecialBlocks,
   rehypeTasks,
 } from './rehypePlugins';
@@ -164,7 +165,8 @@ export function scrollToHeading(heading: string): void {
 
 function anchorProps(props: ComponentProps<'a'>): ComponentProps<'a'> {
   const { children: _children, ...rest } = props;
-  return { ...rest, href: props.href ?? '#' };
+  // '' comes from remark link nodes with no url; React warns on empty href.
+  return { ...rest, href: props.href || '#' };
 }
 
 function VaultImage(props: ComponentProps<'img'>) {
@@ -434,6 +436,7 @@ const processor = unified()
   .use(remarkObsidian)
   .use(remarkRehype)
   .use(rehypeTasks)
+  .use(rehypeHoistEmbeds)
   .use(rehypeCallouts)
   .use(rehypeHeadingAnchors)
   .use(rehypeSpecialBlocks)

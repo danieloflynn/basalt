@@ -1,5 +1,6 @@
 import { Preferences } from '@capacitor/preferences';
 import { create } from 'zustand';
+import { DEFAULT_GRAPH_CONFIG, type GraphConfig } from '@/ui/graph/config';
 
 export interface Settings {
   // Vault / connection
@@ -24,11 +25,24 @@ export interface Settings {
 
   // Editor
   editorMode: 'live' | 'source';
-  /** Sticky default view for opened notes (Obsidian's default-view setting). */
+  /** Sticky default view for opened notes (the app's default-view setting). */
   defaultView: 'reading' | 'editing';
+
+  // Templates
+  /** Vault-relative folder holding template notes (blank falls back to `templates`). */
+  templateFolder: string;
+
+  // New notes
+  /** Where a note created without an explicit folder lands. */
+  newNoteLocation: 'root' | 'folder';
+  /** Target folder when newNoteLocation === 'folder' (vault-relative). */
+  newNoteFolderPath: string;
 
   // Files
   sortOrder: 'name' | 'modified';
+
+  // Graph view (filters, groups, display, forces — one persisted blob).
+  graph: GraphConfig;
 
   // Multi-vault (ST-6). Each vault is a git working tree in its own dir.
   vaults: VaultInfo[];
@@ -57,7 +71,11 @@ export const DEFAULT_SETTINGS: Settings = {
   fontScale: 1,
   editorMode: 'live',
   defaultView: 'reading',
+  templateFolder: 'templates',
+  newNoteLocation: 'root',
+  newNoteFolderPath: '',
   sortOrder: 'name',
+  graph: DEFAULT_GRAPH_CONFIG,
   vaults: [],
   activeVault: 'vault',
 };

@@ -1,5 +1,6 @@
 import { vaultService } from '@/services';
 import { useNav } from '@/state/nav';
+import { defaultNewNoteFolder } from '@/ui/templates';
 import { IconBack, IconCommand, IconPlus, IconSearch } from '@/ui/icons';
 import { CommandPalette } from '@/ui/components/CommandPalette';
 import { QuickOpen } from '@/ui/components/QuickOpen';
@@ -45,7 +46,7 @@ export function BottomPill() {
           className="iconbtn"
           aria-label="New note"
           onClick={async () => {
-            const path = await vaultService.createNote('', 'Untitled');
+            const path = await vaultService.createNote(defaultNewNoteFolder(), 'Untitled');
             nav.push({ name: 'edit', path });
           }}
         >

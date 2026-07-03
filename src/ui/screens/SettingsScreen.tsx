@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { getGitEngine, setVaultDir } from '@/engine';
 import { syncService, useSettings, useSync, vaultService, type VaultInfo } from '@/services';
 import { useNav } from '@/state/nav';
@@ -172,6 +172,44 @@ export function SettingsScreen() {
         </div>
 
         <div className="group">
+          <p className="group__label">Templates</p>
+          <div className="card">
+            <TextSetting
+              label="Template folder location"
+              desc="Where your template notes live. The command palette's Insert template and New note from template actions list the markdown notes in this folder."
+              value={settings.templateFolder}
+              placeholder="templates"
+              onCommit={(v) => void update({ templateFolder: v.trim() })}
+            />
+          </div>
+        </div>
+
+        <div className="group">
+          <p className="group__label">New notes</p>
+          <div className="card">
+            <ChoiceSetting
+              label="Default location for new notes"
+              desc="Where a note lands when it's created without a folder — the bottom-bar New note button and the quick switcher's Create action."
+              options={[
+                { label: 'Vault root', value: 'root' as const },
+                { label: 'Folder', value: 'folder' as const },
+              ]}
+              value={settings.newNoteLocation}
+              onChange={(v) => void update({ newNoteLocation: v })}
+            />
+            {settings.newNoteLocation === 'folder' && (
+              <TextSetting
+                label="New note folder"
+                desc="Vault-relative folder, e.g. Daily or Inbox. Leave blank for the vault root."
+                value={settings.newNoteFolderPath}
+                placeholder="Inbox"
+                onCommit={(v) => void update({ newNoteFolderPath: v.trim() })}
+              />
+            )}
+          </div>
+        </div>
+
+        <div className="group">
           <p className="group__label">Appearance</p>
           <div className="card">
             <ChoiceSetting
@@ -290,6 +328,50 @@ function ToggleSetting({
         aria-checked={value}
         aria-label={label}
         onClick={() => onChange(!value)}
+      />
+    </div>
+  );
+}
+
+function TextSetting({
+  label,
+  desc,
+  value,
+  placeholder,
+  onCommit,
+}: {
+  label: string;
+  desc?: string;
+  value: string;
+  placeholder?: string;
+  onCommit: (v: string) => void;
+}) {
+  // Local draft so typing doesn't churn the store / re-persist every keystroke;
+  // commit on blur or Enter. Re-seed when the persisted value changes elsewhere.
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+  const commit = () => {
+    if (draft !== value) onCommit(draft);
+  };
+  return (
+    <div className="setting" style={{ flexWrap: 'wrap', gap: 8 }}>
+      <div className="setting__body" style={{ flexBasis: '100%' }}>
+        <p className="setting__label">{label}</p>
+        {desc && <p className="setting__desc">{desc}</p>}
+      </div>
+      <input
+        className="dialog__input"
+        style={{ flexBasis: '100%' }}
+        value={draft}
+        placeholder={placeholder}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') e.currentTarget.blur();
+        }}
+        autoCapitalize="none"
+        autoCorrect="off"
+        spellCheck={false}
       />
     </div>
   );

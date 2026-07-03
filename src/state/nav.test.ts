@@ -84,10 +84,22 @@ describe('nav viewMode (sticky editing)', () => {
 
   it('editing mode reroutes every note open to the editor', () => {
     nav().setViewMode('editing');
-    nav().push({ name: 'note', path: 'a.md', heading: 'Intro' }); // e.g. from the sidebar
+    nav().push({ name: 'note', path: 'a.md' }); // e.g. from the sidebar
     expect(currentScreen(nav())).toEqual({ name: 'edit', path: 'a.md' });
     openNote('b.md'); // e.g. from quick open / a wikilink
     expect(currentScreen(nav())).toEqual({ name: 'edit', path: 'b.md' });
+  });
+
+  it('preserves the heading anchor when rerouting to the editor ([[Note#Section]])', () => {
+    nav().setViewMode('editing');
+    // A [[Note#Section]] tap opens {name:'note', heading} — the reroute to the
+    // editor must carry the heading through so the caret can land on it.
+    openNote('a.md', 'Section Two');
+    expect(currentScreen(nav())).toEqual({
+      name: 'edit',
+      path: 'a.md',
+      heading: 'Section Two',
+    });
   });
 
   it('explicit edit pushes stay edit regardless of mode (fresh-note flows)', () => {
@@ -160,5 +172,14 @@ describe('nav renamePath', () => {
       oid: 'abc',
       when: 1,
     });
+  });
+});
+
+describe('nav reset', () => {
+  it('clears searchSeed so a previous vault query does not leak after a vault switch', () => {
+    nav().seedSearch('#projects');
+    expect(nav().searchSeed).toBe('#projects');
+    nav().reset();
+    expect(nav().searchSeed).toBeNull();
   });
 });
