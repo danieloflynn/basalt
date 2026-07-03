@@ -6,8 +6,9 @@ import { extractOutline, type HeadingInfo } from '@/lib/outline';
 import { extractTags, stripCode } from '@/lib/tags';
 import { stripInlineMarkdown } from '@/lib/plaintext';
 import { buildTree, type TreeFolder } from '@/lib/tree';
-import { isHiddenPath, isMarkdownPath, joinPath, noteTitle } from '@/lib/paths';
+import { dirname, isHiddenPath, isMarkdownPath, joinPath, noteTitle } from '@/lib/paths';
 import { LinkResolver, parseWikilinks } from '@/lib/wikilinks';
+import { rewriteWikilinks } from '@/lib/wikilinkRewrite';
 
 export interface NoteMeta {
   path: string;
@@ -172,8 +173,9 @@ export class VaultService {
     await this.fs.write(path, text);
     this.contents.set(path, text);
     const meta = this.noteMeta(path, text, Date.now());
-    const known = useVault.getState().notes.has(path);
-    if (known) this.search.replace(this.searchDoc(meta, text));
+    // Membership must come from the index itself — the notes map is rebuilt
+    // from file listings and can say "known" for a doc the index never saw.
+    if (this.search.has(path)) this.search.replace(this.searchDoc(meta, text));
     else this.search.add(this.searchDoc(meta, text));
     this.setOutgoing(path, text);
     useVault.setState((s) => {
@@ -194,7 +196,11 @@ export class VaultService {
       n++;
     }
     await this.fs.write(candidate, '');
+    this.contents.set(candidate, '');
     this.resolver.add(candidate);
+    // Index now — every later search op (autosave replace, rename discard)
+    // assumes markdown files are present in the index.
+    this.search.add(this.searchDoc(this.noteMeta(candidate, '', Date.now()), ''));
     await this.afterStructuralChange();
     return candidate;
   }
@@ -203,7 +209,7 @@ export class VaultService {
     await this.fs.remove(path);
     this.contents.delete(path);
     this.resolver.remove(path);
-    if (useVault.getState().notes.has(path)) {
+    if (this.search.has(path)) {
       this.search.discard(path);
     }
     useVault.setState((s) => ({ recents: s.recents.filter((p) => p !== path) }));
@@ -217,7 +223,7 @@ export class VaultService {
     this.resolver.remove(from);
     this.resolver.add(to);
     if (text !== undefined) this.contents.set(to, text);
-    if (isMarkdownPath(from)) this.search.discard(from);
+    if (isMarkdownPath(from) && this.search.has(from)) this.search.discard(from);
     if (isMarkdownPath(to)) {
       const t = text ?? (await this.fs.read(to));
       this.search.add(this.searchDoc(this.noteMeta(to, t, Date.now()), t));
@@ -226,6 +232,53 @@ export class VaultService {
       recents: s.recents.map((p) => (p === from ? to : p)),
     }));
     await this.afterStructuralChange();
+  }
+
+  /**
+   * Rename a note from a user-typed title (the "inline title IS the filename"
+   * model). Returns the path actually used — equal to `path` for a no-op.
+   * Sanitizes/dedupes like createNote, rewrites inbound wikilinks so no link is
+   * orphaned, and migrates note-path stores (recents via renameFile, bookmarks).
+   */
+  async renameByTitle(path: string, rawTitle: string): Promise<string> {
+    const folder = dirname(path);
+    const currentBase = noteTitle(path);
+    // Same char policy as createNote (strip a typed .md, [\/:] -> '-'), trimmed.
+    const base = rawTitle.trim().replace(/\.md$/i, '').replace(/[\\/:]/g, '-').trim();
+    // No-op: nothing typed, or unchanged — no fs call, no sync queued.
+    if (!base || base === currentBase) return path;
+
+    // Dedupe against existing notes; Android's FS is case-insensitive, so
+    // compare lowercased — but exclude ourselves so a deliberate case-only
+    // rename (Foo -> foo) still goes through fs.rename.
+    const taken = new Set(
+      [...useVault.getState().notes.keys()].filter((p) => p !== path).map((p) => p.toLowerCase()),
+    );
+    let candidate = base;
+    let n = 2;
+    while (taken.has(joinPath(folder, `${candidate}.md`).toLowerCase())) {
+      candidate = `${base} ${n}`;
+      n++;
+    }
+    const to = joinPath(folder, `${candidate}.md`);
+    if (to === path) return path;
+
+    // Repoint links BEFORE the rename, while the resolver still knows the old
+    // path (afterwards "Old" would no longer resolve to this note). writeNote
+    // reindexes each source; the final rebuild in renameFile fixes the graph.
+    const newBase = noteTitle(to);
+    for (const [src, text] of this.contents) {
+      if (!isMarkdownPath(src) || isHiddenPath(src)) continue;
+      const rewritten = rewriteWikilinks(text, {
+        newBase,
+        shouldRewrite: (target) => this.resolver.resolve(target, src) === path,
+      });
+      if (rewritten !== text) await this.writeNote(src, rewritten);
+    }
+
+    await this.renameFile(path, to);
+    await this.migrateBookmark(path, to);
+    return to;
   }
 
   async createFolder(path: string): Promise<void> {
@@ -242,7 +295,7 @@ export class VaultService {
       if (p.startsWith(prefix)) {
         this.contents.delete(p);
         this.resolver.remove(p);
-        if (isMarkdownPath(p)) this.search.discard(p);
+        if (isMarkdownPath(p) && this.search.has(p)) this.search.discard(p);
       }
     }
     await this.afterStructuralChange();
@@ -415,17 +468,28 @@ export class VaultService {
       ? current.filter((p) => p !== path)
       : [...current, path];
     useVault.setState({ bookmarks: next });
+    await this.writeBookmarks(next);
+  }
+
+  /** Follow a rename in the bookmarks store + synced .obsidian/bookmarks.json. */
+  private async migrateBookmark(from: string, to: string): Promise<void> {
+    const { bookmarks } = useVault.getState();
+    if (!bookmarks.includes(from)) return;
+    const next = bookmarks.map((p) => (p === from ? to : p));
+    useVault.setState({ bookmarks: next });
+    await this.writeBookmarks(next);
+  }
+
+  private async writeBookmarks(paths: string[]): Promise<void> {
     // Preserve any non-file bookmark items Obsidian may have written.
     let items: unknown[] = [];
     try {
       const parsed = JSON.parse(await this.fs.read(BOOKMARKS_FILE)) as { items?: unknown[] };
-      items = (parsed.items ?? []).filter(
-        (i) => (i as { type?: string }).type !== 'file',
-      );
+      items = (parsed.items ?? []).filter((i) => (i as { type?: string }).type !== 'file');
     } catch {
       // fresh file
     }
-    const fileItems = next.map((p) => ({ type: 'file', path: p }));
+    const fileItems = paths.map((p) => ({ type: 'file', path: p }));
     await this.fs.write(BOOKMARKS_FILE, JSON.stringify({ items: [...items, ...fileItems] }, null, 2));
     this.onEdited();
   }

@@ -31,6 +31,8 @@ interface NavState {
 
   push: (screen: Screen) => void;
   replace: (screen: Screen) => void;
+  /** After a file rename: repoint every history entry (all tabs) at the old path. */
+  renamePath: (from: string, to: string) => void;
   back: () => boolean;
   forward: () => boolean;
   canBack: () => boolean;
@@ -79,6 +81,23 @@ export const useNav = create<NavState>((set, get) => ({
         const history = [...tab.history];
         history[tab.index] = screen;
         return { ...tab, history };
+      }),
+    })),
+
+  renamePath: (from, to) =>
+    set((s) => ({
+      // Keeps back/forward stacks, other tabs, and tabLabel (derived from path)
+      // correct after a rename — every screen carrying the old path is rewritten.
+      tabs: s.tabs.map((tab) => {
+        let changed = false;
+        const history = tab.history.map((screen) => {
+          if ('path' in screen && screen.path === from) {
+            changed = true;
+            return { ...screen, path: to };
+          }
+          return screen;
+        });
+        return changed ? { ...tab, history } : tab;
       }),
     })),
 

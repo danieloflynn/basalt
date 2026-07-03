@@ -11,7 +11,15 @@ import remarkParse from 'remark-parse';
 import remarkRehype from 'remark-rehype';
 import { unified } from 'unified';
 import { extractBlock, removeComments, slugifyHeading, stripBlockMarkers } from '@/lib/outline';
-import { isAudioPath, isMarkdownPath, isPdfPath, isVideoPath } from '@/lib/paths';
+import {
+  basename,
+  dirname,
+  isAudioPath,
+  isMarkdownPath,
+  isPdfPath,
+  isVideoPath,
+  normalizePath,
+} from '@/lib/paths';
 import { openFileExternally } from '@/engine';
 import { vaultService } from '@/services';
 import { openNote, useNav } from '@/state/nav';
@@ -41,6 +49,30 @@ interface MarkdownContextValue {
 }
 
 const MarkdownContext = createContext<MarkdownContextValue>({ path: '', depth: 0 });
+
+/**
+ * An unresolved target is creatable when it names a markdown note — not an
+ * attachment ([[photo.png]]) and not a heading-only link ([[#h]], empty target).
+ * Folder-qualified targets create at that vault path (Obsidian).
+ */
+function isCreatableTarget(target: string): boolean {
+  const name = basename(normalizePath(target.trim()));
+  return name !== '' && (!/\.[a-z0-9]+$/i.test(name) || /\.md$/i.test(name));
+}
+
+// Obsidian: tapping an unresolved [[link]] creates the note and opens the editor.
+let creatingFromLink = false;
+async function createNoteFromLink(target: string): Promise<void> {
+  if (creatingFromLink) return; // double-tap guard
+  creatingFromLink = true;
+  try {
+    const cleaned = normalizePath(target.trim()).replace(/\.md$/i, '');
+    const path = await vaultService.createNote(dirname(cleaned), basename(cleaned));
+    useNav.getState().push({ name: 'edit', path });
+  } finally {
+    creatingFromLink = false;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Custom element renderers
@@ -87,7 +119,11 @@ function SmartAnchor(props: ComponentProps<'a'>) {
         className={resolved ? 'wikilink' : 'wikilink wikilink--unresolved'}
         onClick={(e) => {
           e.preventDefault();
-          if (!resolved || !isMarkdownPath(resolved)) return;
+          if (!resolved) {
+            if (isCreatableTarget(target)) void createNoteFromLink(target);
+            return;
+          }
+          if (!isMarkdownPath(resolved)) return;
           if (resolved === ctx.path && heading) {
             scrollToHeading(heading);
           } else {
@@ -291,6 +327,20 @@ function NoteEmbed({ target, heading, block }: { target: string; heading?: strin
   }, [resolved]);
 
   if (ctx.depth >= 2 || failed || !resolved) {
+    // Genuinely unresolved markdown target: tap to create it (read failures
+    // and non-markdown targets stay inert).
+    if (!resolved && isCreatableTarget(target)) {
+      return (
+        <button
+          type="button"
+          className="embed embed--broken"
+          style={{ display: 'block', width: '100%', textAlign: 'left' }}
+          onClick={() => void createNoteFromLink(target)}
+        >
+          Missing note: {target}
+        </button>
+      );
+    }
     return (
       <span className="embed embed--broken" style={{ display: 'block' }}>
         {failed || !resolved ? `Missing note: ${target}` : `[[${target}]]`}

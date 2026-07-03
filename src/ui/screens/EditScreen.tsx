@@ -6,8 +6,9 @@ import { EditorState } from '@codemirror/state';
 import { EditorView, keymap, placeholder } from '@codemirror/view';
 import { useEffect, useRef, useState } from 'react';
 import { noteTitle } from '@/lib/paths';
-import { useSettings, vaultService } from '@/services';
+import { useSettings, useVault, vaultService } from '@/services';
 import { useNav } from '@/state/nav';
+import { InlineTitle } from '@/ui/components/InlineTitle';
 import {
   IconBold,
   IconCode,
@@ -30,6 +31,19 @@ import { wikilinkCompletions } from '@/ui/editor/wikilinkComplete';
 
 const AUTOSAVE_MS = 800;
 
+// App.tsx keys screens on `screen.path`, so a self-rename remounts this screen.
+// That's harmless here — flushSave clears the dirty flag before the rename and
+// skips writing to a path that no longer exists — but the fresh CodeMirror
+// instance loses the caret. This survives the remount to restore Obsidian's
+// "Enter in the title jumps to the body" behavior.
+let pendingFocusBody: string | null = null;
+
+function focusBodyStart(view: EditorView | null): void {
+  if (!view) return;
+  view.focus();
+  view.dispatch({ selection: { anchor: 0 }, scrollIntoView: true });
+}
+
 export function EditScreen({ path }: { path: string }) {
   const nav = useNav();
   const editorFocused = useNav((s) => s.editorFocused);
@@ -38,19 +52,33 @@ export function EditScreen({ path }: { path: string }) {
   const viewRef = useRef<EditorView | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirtyRef = useRef(false);
+  // Every save targets the *current* path, so a rename can't misfile the buffer.
+  const pathRef = useRef(path);
   const [loaded, setLoaded] = useState(false);
   const [saveState, setSaveState] = useState<'saved' | 'typing'>('saved');
+  const [fresh, setFresh] = useState(false);
+
+  // Persist the buffer to the current path. A stale flush must never recreate a
+  // file that was deleted or renamed away (from another tab / self-rename), so
+  // skip when the target no longer exists in the vault.
+  const flushSave = async (): Promise<void> => {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    const v = viewRef.current;
+    if (!v || !dirtyRef.current) return;
+    dirtyRef.current = false;
+    setSaveState('saved');
+    const target = pathRef.current;
+    if (!useVault.getState().notes.has(target)) return;
+    await vaultService.writeNote(target, v.state.doc.toString());
+  };
 
   useEffect(() => {
+    pathRef.current = path;
     let cancelled = false;
     let view: EditorView | null = null;
-
-    const save = (v: EditorView) => {
-      if (!dirtyRef.current) return;
-      dirtyRef.current = false;
-      setSaveState('saved');
-      void vaultService.writeNote(path, v.state.doc.toString());
-    };
 
     void vaultService.readNote(path).then((text) => {
       if (cancelled || !hostRef.current) return;
@@ -84,20 +112,26 @@ export function EditScreen({ path }: { path: string }) {
               dirtyRef.current = true;
               setSaveState('typing');
               if (saveTimer.current) clearTimeout(saveTimer.current);
-              saveTimer.current = setTimeout(() => save(u.view), AUTOSAVE_MS);
+              saveTimer.current = setTimeout(() => void flushSave(), AUTOSAVE_MS);
             }),
           ],
         }),
       });
       viewRef.current = view;
       setLoaded(true);
+      // Fresh note (the create → edit flow): empty + still named Untitled.
+      if (text.length === 0 && /^Untitled( \d+)?$/.test(noteTitle(path))) setFresh(true);
+      // Restore the caret in the body after a rename-triggered remount.
+      if (pendingFocusBody === path) {
+        pendingFocusBody = null;
+        focusBodyStart(view);
+      }
     });
 
     return () => {
       cancelled = true;
-      if (saveTimer.current) clearTimeout(saveTimer.current);
       if (view) {
-        save(view); // never lose work on navigate-away (E-3)
+        void flushSave(); // never lose work on navigate-away (E-3)
         view.destroy();
       }
       viewRef.current = null;
@@ -143,6 +177,23 @@ export function EditScreen({ path }: { path: string }) {
           </button>
         </div>
       </header>
+
+      {/* Pinned above the editor (does not scroll with the document — an
+          accepted trade-off vs. threading the title into the CodeMirror doc). */}
+      <InlineTitle
+        path={path}
+        autoFocus={fresh}
+        blurOnEnter={false}
+        onBeforeCommit={flushSave}
+        onCommitted={(finalPath, { renamed, viaEnter }) => {
+          pathRef.current = finalPath;
+          if (!viaEnter) return;
+          // Enter moves focus to the body start (Obsidian). A rename remounts
+          // this screen, so hand off via pendingFocusBody; otherwise focus now.
+          if (renamed) pendingFocusBody = finalPath;
+          else focusBodyStart(viewRef.current);
+        }}
+      />
 
       <div ref={hostRef} style={{ flex: 1, minHeight: 0, overflow: 'hidden' }} />
       {!loaded && <div className="state" />}

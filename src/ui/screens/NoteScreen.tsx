@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { parseFrontmatter } from '@/lib/frontmatter';
-import { noteTitle } from '@/lib/paths';
 import { vaultService } from '@/services';
 import { useNav } from '@/state/nav';
 import { IconDots, IconPencil } from '@/ui/icons';
 import { Markdown, scrollToHeading } from '@/ui/markdown/Markdown';
+import { InlineTitle } from '@/ui/components/InlineTitle';
 import { NoteMenu } from '@/ui/components/NoteMenu';
 import { SidebarToggle } from '@/ui/workspace/chrome';
 import { usePullDown } from '@/ui/hooks/usePullDown';
@@ -12,7 +12,9 @@ import { usePullDown } from '@/ui/hooks/usePullDown';
 /** Reading view — Obsidian layout: sidebar toggle left, edit + menu right, inline title. */
 export function NoteScreen({ path, heading }: { path: string; heading?: string }) {
   const nav = useNav();
-  const [text, setText] = useState<string | null>(null);
+  // Seed from the content cache so a rename-triggered remount doesn't flash the
+  // loading state or lose the rendered body — the retitle stays smooth.
+  const [text, setText] = useState<string | null>(() => vaultService.noteContent(path) ?? null);
   const [error, setError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   // Obsidian's pull-down-to-search, on the reading scroller.
@@ -20,7 +22,7 @@ export function NoteScreen({ path, heading }: { path: string; heading?: string }
 
   useEffect(() => {
     let cancelled = false;
-    setText(null);
+    if (vaultService.noteContent(path) === undefined) setText(null);
     setError(null);
     vaultService
       .readNote(path)
@@ -82,7 +84,7 @@ export function NoteScreen({ path, heading }: { path: string; heading?: string }
         {error === null && text === null && <div className="state" />}
         {fm !== null && (
           <>
-            <h1 className="inline-title">{noteTitle(path)}</h1>
+            <InlineTitle path={path} />
             {Object.keys(fm.data).length > 0 && <Properties data={fm.data} />}
             <Markdown
               source={fm.body}

@@ -14,9 +14,13 @@ Navigation is per-tab history with back AND forward (`src/state/nav.ts`).
 
 - `npm run dev` — browser dev (mock git engine + demo vault auto-loads after fake onboarding)
 - `npm test` — vitest (domain layer: `src/lib/lib.test.ts`, `src/state/nav.test.ts`)
-- `npm run test:visual` — Playwright screenshot + gesture suite (`tests/visual/`);
-  baselines in `tests/visual/__screenshots__` are committed. After an intentional
-  UI change run `npm run test:visual:update` and eyeball the changed PNGs.
+- `npm run test:visual` — Playwright suite (`tests/visual/`): screenshot specs,
+  gesture specs, and `flows.spec.ts` (integration: note creation + inline-title
+  rename, all entry points). Baselines in `tests/visual/__screenshots__` are
+  committed. After an intentional UI change run `npm run test:visual:update`
+  and eyeball the changed PNGs. Beware: a small text change can sit inside the
+  0.002 diff tolerance, so `--update-snapshots` won't rewrite the PNG — delete
+  the stale baseline to force regeneration.
 - `npm run build` — `tsc --noEmit` then vite build (keep it green)
 - `npm run sync` — build + `cap sync android`
 - Android build: `cd android && JAVA_HOME=$HOME/.local/java/jdk-21.0.11+10/Contents/Home ./gradlew assembleDebug`
@@ -63,3 +67,18 @@ sync indicator (`.sync-columns`) that glows ember while syncing.
 - Edit screen: the format toolbar renders only while the editor has focus
   (`nav.editorFocused`), and the bottom pill hides then — they share the same
   bottom space and used to collide.
+- **The inline title IS the filename** (Obsidian model): `InlineTitle.tsx` in
+  both screens commits via `vaultService.renameByTitle` (sanitize, dedupe,
+  vault-wide `[[wikilink]]` rewrite, bookmark migration) + `nav.renamePath`
+  (rewrites every tab's history). Note creation is dialog-free everywhere —
+  fresh empty `Untitled( N)` notes autofocus the title in the editor. Don't
+  reintroduce name dialogs.
+- App.tsx keys screens on `screen.path`, so a rename remounts the current
+  screen. EditScreen survives this via `pathRef` (saves always target the
+  current path; flush-before-rename; a stale flush skips paths no longer in
+  the vault). Keep that ordering if you touch autosave.
+- `createNote` must add the new note to the MiniSearch index immediately: the
+  index is a derived cache and every later op (autosave `replace`, rename
+  `discard`) assumes markdown files are in it. Membership checks go through
+  `search.has()`, never the notes map (it's rebuilt from file listings and
+  lies about index membership).

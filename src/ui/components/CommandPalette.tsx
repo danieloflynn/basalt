@@ -85,7 +85,9 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       },
       {
         id: 'theme',
-        label: `Theme: switch to ${settings.theme === 'dark' ? 'light' : settings.theme === 'light' ? 'system' : 'dark'}`,
+        // Cycles the *setting* (system → dark → light); "switch to dark" read
+        // wrong when system already rendered dark.
+        label: `Theme: ${settings.theme} → ${settings.theme === 'dark' ? 'light' : settings.theme === 'light' ? 'system' : 'dark'}`,
         icon: <IconCommand size={18} />,
         run: () =>
           void update({

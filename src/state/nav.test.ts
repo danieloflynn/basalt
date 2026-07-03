@@ -68,3 +68,53 @@ describe('nav history', () => {
     expect(currentScreen(nav())).toEqual({ name: 'empty' });
   });
 });
+
+describe('nav renamePath', () => {
+  beforeEach(() => nav().reset());
+
+  it('rewrites entries behind AND ahead of the current index in the active tab', () => {
+    nav().push({ name: 'note', path: 'Old.md' }); // index 1
+    nav().push({ name: 'edit', path: 'Old.md' }); // index 2 (current)
+    nav().push({ name: 'note', path: 'Other.md' }); // index 3
+    nav().back(); // back to index 2 — leaves index 3 ahead
+
+    nav().renamePath('Old.md', 'New.md');
+
+    const tab = nav().tabs[0];
+    expect(tab.history[1]).toEqual({ name: 'note', path: 'New.md' }); // behind
+    expect(tab.history[2]).toEqual({ name: 'edit', path: 'New.md' }); // current
+    expect(tab.history[3]).toEqual({ name: 'note', path: 'Other.md' }); // untouched
+    expect(tab.index).toBe(2);
+    expect(tabLabel(tab)).toBe('New');
+  });
+
+  it('rewrites matching entries across every tab, preserving other fields', () => {
+    nav().push({ name: 'note', path: 'Old.md', heading: 'Intro' });
+    nav().newTab({ name: 'edit', path: 'Old.md' });
+    nav().newTab({ name: 'note', path: 'Keep.md' });
+
+    nav().renamePath('Old.md', 'Renamed.md');
+
+    expect(nav().tabs[0].history[1]).toEqual({
+      name: 'note',
+      path: 'Renamed.md',
+      heading: 'Intro',
+    });
+    expect(nav().tabs[1].history[1]).toEqual({ name: 'edit', path: 'Renamed.md' });
+    expect(nav().tabs[2].history[1]).toEqual({ name: 'note', path: 'Keep.md' });
+    expect(tabLabel(nav().tabs[1])).toBe('Renamed');
+  });
+
+  it('also follows path-carrying history/noteVersion screens', () => {
+    nav().push({ name: 'history', path: 'Old.md' });
+    nav().push({ name: 'noteVersion', path: 'Old.md', oid: 'abc', when: 1 });
+    nav().renamePath('Old.md', 'New.md');
+    expect(nav().tabs[0].history[1]).toEqual({ name: 'history', path: 'New.md' });
+    expect(nav().tabs[0].history[2]).toEqual({
+      name: 'noteVersion',
+      path: 'New.md',
+      oid: 'abc',
+      when: 1,
+    });
+  });
+});

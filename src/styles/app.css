@@ -807,6 +807,29 @@
   line-height: 1.2;
   padding: 10px var(--pad-screen) 0;
   overflow-wrap: break-word;
+  color: var(--text);
+}
+
+/* Editable variant (both screens): a textarea sized exactly like the h1 so
+   reading-view pixels don't shift. Transparent, no chrome; the ember caret is
+   the only affordance (as in Obsidian's inline title). */
+textarea.inline-title {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  border: none;
+  background: transparent;
+  caret-color: var(--ember);
+  resize: none;
+  overflow: hidden;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+textarea.inline-title::placeholder {
+  color: var(--text-faint);
 }
 
 .banners-layer {
@@ -1166,6 +1189,8 @@
 }
 
 .quickopen .search-input {
+  /* .search-input's flex: 1 is for row layouts; in this column it crushes the height. */
+  flex: none;
   width: 100%;
 }
 

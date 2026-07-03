@@ -137,7 +137,20 @@ function FilesPanel() {
   const { update } = useSettings();
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [actionTarget, setActionTarget] = useState<TreeNode | null>(null);
-  const [creating, setCreating] = useState<'note' | 'folder' | null>(null);
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const creatingNote = useRef(false);
+
+  // Obsidian: new note opens the editor on "Untitled" — no naming dialog.
+  const newNote = async () => {
+    if (creatingNote.current) return; // double-tap guard
+    creatingNote.current = true;
+    try {
+      const path = await vaultService.createNote('', 'Untitled');
+      useNav.getState().push({ name: 'edit', path });
+    } finally {
+      creatingNote.current = false;
+    }
+  };
 
   const toggle = (path: string) => {
     setCollapsed((prev) => {
@@ -160,10 +173,10 @@ function FilesPanel() {
           {sortOrder === 'name' ? 'A–Z' : 'Recent'}
         </button>
         <span style={{ flex: 1 }} />
-        <button className="iconbtn" aria-label="New folder" onClick={() => setCreating('folder')}>
+        <button className="iconbtn" aria-label="New folder" onClick={() => setCreatingFolder(true)}>
           <IconFolderPlus size={20} />
         </button>
-        <button className="iconbtn" aria-label="New note" onClick={() => setCreating('note')}>
+        <button className="iconbtn" aria-label="New note" onClick={() => void newNote()}>
           <IconNotePlus size={20} />
         </button>
       </div>
@@ -179,22 +192,17 @@ function FilesPanel() {
       {actionTarget && (
         <FileActionsSheet node={actionTarget} onClose={() => setActionTarget(null)} />
       )}
-      {creating && (
+      {/* Folders keep the dialog — they have no inline title to rename by. */}
+      {creatingFolder && (
         <Dialog
-          title={creating === 'note' ? 'New note' : 'New folder'}
-          placeholder={creating === 'note' ? 'Note name' : 'Folder name'}
+          title="New folder"
+          placeholder="Folder name"
           confirmLabel="Create"
-          onCancel={() => setCreating(null)}
+          onCancel={() => setCreatingFolder(false)}
           onConfirm={async (name) => {
-            const kind = creating;
-            setCreating(null);
+            setCreatingFolder(false);
             if (!name.trim()) return;
-            if (kind === 'note') {
-              const path = await vaultService.createNote('', name.trim());
-              useNav.getState().push({ name: 'edit', path });
-            } else {
-              await vaultService.createFolder(name.trim().replace(/[\\:]/g, '-'));
-            }
+            await vaultService.createFolder(name.trim().replace(/[\\:]/g, '-'));
           }}
         />
       )}

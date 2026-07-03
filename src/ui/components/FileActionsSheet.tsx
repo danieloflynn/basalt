@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { dirname, joinPath, noteTitle } from '@/lib/paths';
 import type { TreeNode } from '@/lib/tree';
 import { vaultService } from '@/services';
-import { IconCopy, IconRename, IconTrash } from '@/ui/icons';
+import { useNav } from '@/state/nav';
+import { IconCopy, IconNotePlus, IconRename, IconTrash } from '@/ui/icons';
 import { Dialog } from './Dialog';
 
 /** Long-press actions on a file or folder: rename, duplicate, delete (F-2/F-4). */
@@ -65,6 +66,21 @@ export function FileActionsSheet({ node, onClose }: { node: TreeNode; onClose: (
       <div className="sheet">
         <div className="sheet__grab" />
         <p className="sheet__title">{displayName}</p>
+        {isFolder && (
+          <button
+            className="sheet__item"
+            onClick={async () => {
+              onClose(); // close first so a second tap can't create twice
+              const path = await vaultService.createNote(node.path, 'Untitled');
+              useNav.getState().push({ name: 'edit', path });
+            }}
+          >
+            <span className="row__icon">
+              <IconNotePlus size={20} />
+            </span>
+            New note
+          </button>
+        )}
         <button className="sheet__item" onClick={() => setMode('rename')}>
           <span className="row__icon">
             <IconRename size={20} />
