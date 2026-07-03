@@ -506,6 +506,19 @@ export class VaultService {
     }
   }
 
+  /**
+   * Attachment target folder, from Obsidian's `.obsidian/app.json`
+   * (`attachmentFolderPath`). `/` means the vault root; a per-note (`./…`) or
+   * unset value falls back to a plain `attachments` folder.
+   */
+  async attachmentFolder(): Promise<string> {
+    const cfg = await this.readJsonConfig<{ attachmentFolderPath?: string }>('.obsidian/app.json');
+    const p = cfg?.attachmentFolderPath?.trim();
+    if (p === '/') return '';
+    if (!p || p.startsWith('.')) return 'attachments';
+    return p;
+  }
+
   async dailyNotePath(now = new Date()): Promise<string> {
     const cfg = await this.readJsonConfig<{ folder?: string; format?: string }>(
       '.obsidian/daily-notes.json',

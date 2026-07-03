@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-import { currentScreen, tabLabel, useNav } from './nav';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { currentScreen, openNote, tabLabel, useNav } from './nav';
 
 const nav = () => useNav.getState();
 
@@ -66,6 +66,50 @@ describe('nav history', () => {
 
     nav().closeTab(0); // closing the last tab leaves a fresh home tab
     expect(currentScreen(nav())).toEqual({ name: 'empty' });
+  });
+});
+
+describe('nav viewMode (sticky editing)', () => {
+  beforeEach(() => {
+    nav().reset();
+    nav().setViewMode('reading');
+  });
+  // viewMode is a global pref that survives reset(), so restore it for others.
+  afterEach(() => nav().setViewMode('reading'));
+
+  it('defaults to reading: opening a note pushes the reader', () => {
+    openNote('a.md');
+    expect(currentScreen(nav())).toEqual({ name: 'note', path: 'a.md' });
+  });
+
+  it('editing mode reroutes every note open to the editor', () => {
+    nav().setViewMode('editing');
+    nav().push({ name: 'note', path: 'a.md', heading: 'Intro' }); // e.g. from the sidebar
+    expect(currentScreen(nav())).toEqual({ name: 'edit', path: 'a.md' });
+    openNote('b.md'); // e.g. from quick open / a wikilink
+    expect(currentScreen(nav())).toEqual({ name: 'edit', path: 'b.md' });
+  });
+
+  it('explicit edit pushes stay edit regardless of mode (fresh-note flows)', () => {
+    nav().setViewMode('reading');
+    nav().push({ name: 'edit', path: 'new.md' });
+    expect(currentScreen(nav())).toEqual({ name: 'edit', path: 'new.md' });
+  });
+
+  it('flipping back to reading opens the reader again', () => {
+    nav().setViewMode('editing');
+    nav().push({ name: 'note', path: 'a.md' });
+    expect(currentScreen(nav())).toEqual({ name: 'edit', path: 'a.md' });
+
+    nav().setViewMode('reading');
+    nav().push({ name: 'note', path: 'b.md' });
+    expect(currentScreen(nav())).toEqual({ name: 'note', path: 'b.md' });
+  });
+
+  it('non-note screens are never rewritten by editing mode', () => {
+    nav().setViewMode('editing');
+    nav().push({ name: 'settings' });
+    expect(currentScreen(nav())).toEqual({ name: 'settings' });
   });
 });
 

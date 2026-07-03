@@ -24,7 +24,16 @@ export function wikilinkCompletions(context: CompletionContext): CompletionResul
       return {
         label: t.title,
         detail: ambiguous ? stripExt(t.path) : undefined,
-        apply: `${insert}]]`,
+        // closeBrackets already left "]]" after the caret; extend the replaced
+        // range through it so we don't strand a second pair ([[Note]]]]).
+        apply: (view, _completion, from, to) => {
+          const end = view.state.sliceDoc(to, to + 2) === ']]' ? to + 2 : to;
+          const text = `${insert}]]`;
+          view.dispatch({
+            changes: { from, to: end, insert: text },
+            selection: { anchor: from + text.length },
+          });
+        },
         type: 'text',
       };
     }),

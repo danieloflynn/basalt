@@ -62,6 +62,25 @@ class CheckboxWidget extends WidgetType {
   }
 }
 
+/** Replaces a raw list marker (- * +) with a dimmed bullet dot, sized to 1ch
+ *  so the surrounding column math (hanging indent) stays exact in the mono font. */
+class BulletWidget extends WidgetType {
+  override eq(): boolean {
+    return true;
+  }
+
+  toDOM(): HTMLElement {
+    const dot = document.createElement('span');
+    dot.className = 'lp-bullet';
+    dot.textContent = '•';
+    return dot;
+  }
+
+  override ignoreEvent(): boolean {
+    return true;
+  }
+}
+
 class LinkTextWidget extends WidgetType {
   constructor(
     private display: string,
@@ -114,7 +133,7 @@ function buildDecorations(view: EditorView): DecorationSet {
       },
     });
 
-    // 2. Regex-driven: wikilinks, highlights, checkboxes on inactive lines.
+    // 2. Regex-driven: wikilinks and highlights on inactive lines.
     const text = state.sliceDoc(from, to);
 
     for (const m of text.matchAll(WIKILINK)) {
@@ -151,19 +170,48 @@ function buildDecorations(view: EditorView): DecorationSet {
       );
     }
 
-    for (const m of text.matchAll(/^(\s*(?:[-*+]|\d+[.)])\s+)\[([ xX])\]\s/gm)) {
-      const boxStart = from + m.index + m[1].length;
-      const line = state.doc.lineAt(boxStart).number;
-      if (activeLines.has(line)) continue;
+    // 3. Heading lines: match reading view's display font (both modes get the
+    //    line class here in live mode; source mode leans on the highlight style).
+    for (const m of text.matchAll(/^(#{1,6})[ \t]/gm)) {
+      const lineStart = from + m.index;
+      const line = state.doc.lineAt(lineStart);
+      if (line.from !== lineStart) continue; // partial match at a chunk edge
+      decorations.push(Decoration.line({ class: `cm-lp-heading cm-lp-h${m[1].length}` }).range(lineStart));
+    }
+
+    // 4. List lines: bullets → dot, tasks → a single checkbox (marker hidden),
+    //    ordered markers stay (dimmed by the highlight). Every list line gets a
+    //    hanging indent so wrapped text aligns past the marker.
+    for (const m of text.matchAll(/^([ \t]*)([-*+]|\d+[.)])([ \t]+)(\[[ xX]\][ \t])?/gm)) {
+      const [prefix, indent, marker, gap, task] = m;
+      const lineStart = from + m.index;
+      const line = state.doc.lineAt(lineStart);
+      if (line.from !== lineStart) continue;
+      const markerStart = lineStart + indent.length;
+      const contentEnd = lineStart + prefix.length; // where the item text begins
+      // ch is exact in the mono font, so the wrapped-line indent lands under the text.
       decorations.push(
-        Decoration.replace({
-          widget: new CheckboxWidget(m[2] !== ' ', boxStart),
-        }).range(boxStart, boxStart + 3),
+        Decoration.line({
+          class: 'cm-lp-list',
+          attributes: { style: `padding-left:calc(2px + ${prefix.length}ch);text-indent:-${prefix.length}ch` },
+        }).range(lineStart),
       );
-      if (m[2] !== ' ') {
-        const lineEnd = state.doc.lineAt(boxStart).to;
+      if (activeLines.has(line.number)) continue;
+      if (task) {
+        const boxStart = markerStart + marker.length + gap.length;
+        const checked = task[1] !== ' ';
         decorations.push(
-          Decoration.mark({ class: 'lp-done' }).range(boxStart + 4, lineEnd),
+          Decoration.replace({ widget: new CheckboxWidget(checked, boxStart) }).range(
+            markerStart,
+            contentEnd,
+          ),
+        );
+        if (checked && contentEnd < line.to) {
+          decorations.push(Decoration.mark({ class: 'lp-done' }).range(contentEnd, line.to));
+        }
+      } else if (marker === '-' || marker === '*' || marker === '+') {
+        decorations.push(
+          Decoration.replace({ widget: new BulletWidget() }).range(markerStart, markerStart + 1),
         );
       }
     }
@@ -216,10 +264,17 @@ const livePreviewTheme = EditorView.baseTheme({
     color: 'var(--text-faint)',
     textDecoration: 'line-through',
   },
+  '.lp-bullet': {
+    display: 'inline-block',
+    width: '1ch',
+    textAlign: 'center',
+    color: 'var(--text-muted)',
+  },
   '.lp-checkbox': {
     display: 'inline-block',
     width: '1.1em',
     height: '1.1em',
+    marginRight: '0.4em',
     verticalAlign: 'text-bottom',
     border: '1.5px solid var(--border-strong)',
     borderRadius: '5px',
@@ -231,4 +286,16 @@ const livePreviewTheme = EditorView.baseTheme({
     background: 'var(--ember)',
     borderColor: 'var(--ember)',
   },
+  // Heading lines match the reading view's display type so toggling modes
+  // doesn't shift the font (parity with `.md h1…h6` in markdown.css).
+  '.cm-lp-heading': {
+    fontFamily: 'var(--font-display)',
+    fontWeight: '580',
+    lineHeight: '1.25',
+    letterSpacing: '0.005em',
+  },
+  '.cm-lp-h1': { fontSize: 'var(--text-2xl)' },
+  '.cm-lp-h2': { fontSize: 'var(--text-xl)' },
+  '.cm-lp-h3': { fontSize: 'var(--text-lg)' },
+  '.cm-lp-h4, .cm-lp-h5, .cm-lp-h6': { fontSize: 'var(--text-body)' },
 });

@@ -47,6 +47,8 @@ export function App() {
       await useSettings.getState().load();
       const { settings } = useSettings.getState();
       setVaultDir(settings.activeVault);
+      // Sticky view mode persists like Obsidian's default-view setting.
+      useNav.getState().setViewMode(settings.defaultView);
       const info = await getGitEngine()
         .repoInfo({ dir: settings.activeVault })
         .catch(() => ({ exists: false }));

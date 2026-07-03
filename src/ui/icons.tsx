@@ -301,3 +301,75 @@ export const IconCopy = (p: P) => (
     <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
   </I>
 );
+
+// ---- Editor toolbar formatting icons ----
+
+export const IconStrike = (p: P) => (
+  <I {...p}>
+    <path d="M16 4H9a3 3 0 0 0-2.83 4" />
+    <path d="M14 12a4 4 0 0 1 0 8H6" />
+    <path d="M4 12h16" />
+  </I>
+);
+
+export const IconHighlight = (p: P) => (
+  <I {...p}>
+    <path d="m9 11-6 6v3h9l3-3" />
+    <path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4" />
+  </I>
+);
+
+export const IconQuote = (p: P) => (
+  <I {...p}>
+    <path d="M16 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2Z" />
+    <path d="M5 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2Z" />
+  </I>
+);
+
+export const IconLink = (p: P) => (
+  <I {...p}>
+    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+  </I>
+);
+
+export const IconListNumbered = (p: P) => (
+  <I {...p}>
+    <path d="M10 6h11M10 12h11M10 18h11" />
+    <path d="M4 6h1v4M4 10h2" />
+    <path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1" />
+  </I>
+);
+
+export const IconIndent = (p: P) => (
+  <I {...p}>
+    <path d="m4 8 4 4-4 4" />
+    <path d="M12 6h9M12 12h9M12 18h9" />
+  </I>
+);
+
+export const IconOutdent = (p: P) => (
+  <I {...p}>
+    <path d="m8 8-4 4 4 4" />
+    <path d="M12 6h9M12 12h9M12 18h9" />
+  </I>
+);
+
+export const IconAttach = (p: P) => (
+  <I {...p}>
+    <path d="M21.4 11 12.25 20.2a6 6 0 0 1-8.49-8.49l9.2-9.19a4 4 0 0 1 5.65 5.66l-9.19 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+  </I>
+);
+
+export const IconEmbed = (p: P) => (
+  <I {...p}>
+    <rect x="4" y="3" width="16" height="18" rx="2" />
+    <path d="M8 8h8M8 12h8M8 16h5" />
+  </I>
+);
+
+export const IconHash = (p: P) => (
+  <I {...p}>
+    <path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18" />
+  </I>
+);

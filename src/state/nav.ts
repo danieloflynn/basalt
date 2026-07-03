@@ -11,6 +11,9 @@ export type Screen =
 
 export type SidebarView = 'files' | 'search' | 'tags' | 'properties' | 'bookmarks';
 
+/** Global default view (Obsidian's "default editing/reading" toggle). */
+export type ViewMode = 'reading' | 'editing';
+
 /** Workspace overlays (bottom-pill popups); global so gestures can open them. */
 export type Overlay = 'none' | 'quickopen' | 'tabs' | 'palette';
 
@@ -29,6 +32,16 @@ interface NavState {
   sidebarOpen: boolean;
   sidebarView: SidebarView;
 
+  /**
+   * Sticky view mode: when 'editing', every note opened via `push` lands in the
+   * editor instead of the reader (Obsidian's universal default-view toggle).
+   * Held here (nav is self-contained) so `push` can consult it without importing
+   * the settings store; App bootstrap hydrates it from persisted settings and
+   * the eye/pencil toggles mirror it back.
+   */
+  viewMode: ViewMode;
+  setViewMode: (mode: ViewMode) => void;
+
   push: (screen: Screen) => void;
   replace: (screen: Screen) => void;
   /** After a file rename: repoint every history entry (all tabs) at the old path. */
@@ -41,6 +54,10 @@ interface NavState {
 
   openSidebar: (view?: SidebarView) => void;
   closeSidebar: () => void;
+  /** Right drawer (backlinks) — mutually exclusive with the left sidebar. */
+  rightSidebarOpen: boolean;
+  openRightSidebar: () => void;
+  closeRightSidebar: () => void;
   setSidebarView: (view: SidebarView) => void;
   /** Prefill the sidebar search view and open it (tag taps etc.). */
   searchSeed: string | null;
@@ -64,15 +81,27 @@ export const useNav = create<NavState>((set, get) => ({
   sidebarOpen: false,
   sidebarView: 'files',
 
+  viewMode: 'reading',
+  setViewMode: (mode) => set({ viewMode: mode }),
+
   push: (screen) =>
-    set((s) => ({
-      sidebarOpen: false,
-      tabs: s.tabs.map((tab, i) => {
-        if (i !== s.active) return tab;
-        const history = [...tab.history.slice(0, tab.index + 1), screen];
-        return { history, index: history.length - 1 };
-      }),
-    })),
+    set((s) => {
+      // Editing mode reroutes reader opens to the editor; explicit 'edit' pushes
+      // (new-note flows) are untouched, so fresh notes always open to write.
+      const eff: Screen =
+        s.viewMode === 'editing' && screen.name === 'note'
+          ? { name: 'edit', path: screen.path }
+          : screen;
+      return {
+        sidebarOpen: false,
+        rightSidebarOpen: false,
+        tabs: s.tabs.map((tab, i) => {
+          if (i !== s.active) return tab;
+          const history = [...tab.history.slice(0, tab.index + 1), eff];
+          return { history, index: history.length - 1 };
+        }),
+      };
+    }),
 
   replace: (screen) =>
     set((s) => ({
@@ -102,9 +131,13 @@ export const useNav = create<NavState>((set, get) => ({
     })),
 
   back: () => {
-    const { tabs, active, sidebarOpen, overlay } = get();
+    const { tabs, active, sidebarOpen, rightSidebarOpen, overlay } = get();
     if (overlay !== 'none') {
       set({ overlay: 'none' });
+      return true;
+    }
+    if (rightSidebarOpen) {
+      set({ rightSidebarOpen: false });
       return true;
     }
     if (sidebarOpen) {
@@ -141,11 +174,21 @@ export const useNav = create<NavState>((set, get) => ({
   },
 
   reset: () =>
-    set({ tabs: [newTabState()], active: 0, sidebarOpen: false, sidebarView: 'files', overlay: 'none' }),
+    set({
+      tabs: [newTabState()],
+      active: 0,
+      sidebarOpen: false,
+      rightSidebarOpen: false,
+      sidebarView: 'files',
+      overlay: 'none',
+    }),
 
   openSidebar: (view) =>
-    set((s) => ({ sidebarOpen: true, sidebarView: view ?? s.sidebarView })),
+    set((s) => ({ sidebarOpen: true, rightSidebarOpen: false, sidebarView: view ?? s.sidebarView })),
   closeSidebar: () => set({ sidebarOpen: false }),
+  rightSidebarOpen: false,
+  openRightSidebar: () => set({ rightSidebarOpen: true, sidebarOpen: false }),
+  closeRightSidebar: () => set({ rightSidebarOpen: false }),
   setSidebarView: (view) => set({ sidebarView: view, searchSeed: null }),
   searchSeed: null,
   seedSearch: (query) =>

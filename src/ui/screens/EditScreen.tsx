@@ -1,7 +1,7 @@
-import { autocompletion, closeBrackets } from '@codemirror/autocomplete';
+import { autocompletion, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
 import { history, historyKeymap, redo, undo, defaultKeymap } from '@codemirror/commands';
 import { markdown, markdownKeymap, markdownLanguage } from '@codemirror/lang-markdown';
-import { openSearchPanel, search, searchKeymap } from '@codemirror/search';
+import { search, searchKeymap } from '@codemirror/search';
 import { EditorState } from '@codemirror/state';
 import { EditorView, keymap, placeholder } from '@codemirror/view';
 import { useEffect, useRef, useState } from 'react';
@@ -10,22 +10,10 @@ import { noteTitle } from '@/lib/paths';
 import { useSettings, useVault, vaultService } from '@/services';
 import { useNav } from '@/state/nav';
 import { InlineTitle } from '@/ui/components/InlineTitle';
-import {
-  IconBold,
-  IconCode,
-  IconDots,
-  IconEye,
-  IconHeading,
-  IconItalic,
-  IconList,
-  IconRedo,
-  IconSearch,
-  IconTodo,
-  IconUndo,
-  IconWikilink,
-} from '@/ui/icons';
+import { IconDots, IconEye, IconRedo, IconUndo } from '@/ui/icons';
 import { NoteMenu } from '@/ui/components/NoteMenu';
 import { SidebarToggle } from '@/ui/workspace/chrome';
+import { EditorToolbar } from '@/ui/editor/EditorToolbar';
 import { livePreview } from '@/ui/editor/livePreview';
 import { basaltEditorTheme, basaltHighlight } from '@/ui/editor/theme';
 import { wikilinkCompletions } from '@/ui/editor/wikilinkComplete';
@@ -90,8 +78,16 @@ export function EditScreen({ path }: { path: string }) {
           doc: text,
           extensions: [
             history(),
-            // markdownKeymap first: Enter continues lists, Backspace unwraps.
-            keymap.of([...markdownKeymap, ...searchKeymap, ...defaultKeymap, ...historyKeymap]),
+            // markdownKeymap first: Enter continues lists, Backspace unwraps. Then
+            // closeBracketsKeymap so Backspace inside an inserted pair ([[|]], [|])
+            // clears both sides before defaultKeymap's plain char-delete.
+            keymap.of([
+              ...markdownKeymap,
+              ...closeBracketsKeymap,
+              ...searchKeymap,
+              ...defaultKeymap,
+              ...historyKeymap,
+            ]),
             markdown({ base: markdownLanguage }),
             basaltEditorTheme,
             basaltHighlight,
@@ -170,7 +166,12 @@ export function EditScreen({ path }: { path: string }) {
           <button
             className="iconbtn iconbtn--accent"
             aria-label="Reading view"
-            onClick={() => nav.replace({ name: 'note', path })}
+            onClick={() => {
+              // Sticky: flip the global default so every note opens to read.
+              nav.setViewMode('reading');
+              void useSettings.getState().update({ defaultView: 'reading' });
+              nav.replace({ name: 'note', path });
+            }}
           >
             <IconEye size={20} />
           </button>
@@ -201,137 +202,9 @@ export function EditScreen({ path }: { path: string }) {
       {!loaded && <div className="state" />}
 
       {/* Obsidian behavior: the toolbar rides the keyboard, the pill fills in otherwise. */}
-      {editorFocused && <Toolbar viewRef={viewRef} />}
+      {editorFocused && <EditorToolbar viewRef={viewRef} />}
       {menuOpen && <NoteMenu path={path} onClose={() => setMenuOpen(false)} />}
     </div>
   );
 }
 
-/** Touch formatting bar pinned above the keyboard (E-8). */
-function Toolbar({ viewRef }: { viewRef: React.RefObject<EditorView | null> }) {
-  const { settings, update } = useSettings();
-
-  const act = (fn: (v: EditorView) => void) => () => {
-    const v = viewRef.current;
-    if (!v) return;
-    fn(v);
-    v.focus();
-  };
-
-  return (
-    <div
-      // Keep taps here from blurring the editor (which would hide this bar).
-      onPointerDown={(e) => e.preventDefault()}
-      style={{
-        display: 'flex',
-        justifyContent: 'space-around',
-        borderTop: '1px solid var(--border)',
-        background: 'var(--surface)',
-        paddingBottom: 'var(--safe-bottom)',
-        flexShrink: 0,
-      }}
-    >
-      <button className="iconbtn" aria-label="Heading" onClick={act(cycleHeading)}>
-        <IconHeading size={20} />
-      </button>
-      <button className="iconbtn" aria-label="Bold" onClick={act((v) => wrapSelection(v, '**'))}>
-        <IconBold size={20} />
-      </button>
-      <button className="iconbtn" aria-label="Italic" onClick={act((v) => wrapSelection(v, '*'))}>
-        <IconItalic size={20} />
-      </button>
-      <button className="iconbtn" aria-label="List" onClick={act((v) => togglePrefix(v, '- '))}>
-        <IconList size={20} />
-      </button>
-      <button
-        className="iconbtn"
-        aria-label="Task"
-        onClick={act((v) => togglePrefix(v, '- [ ] '))}
-      >
-        <IconTodo size={20} />
-      </button>
-      <button className="iconbtn" aria-label="Wikilink" onClick={act(insertWikilink)}>
-        <IconWikilink size={20} />
-      </button>
-      <button className="iconbtn" aria-label="Find and replace" onClick={act(openSearchPanel)}>
-        <IconSearch size={20} />
-      </button>
-      <button
-        className="iconbtn"
-        aria-label={settings.editorMode === 'live' ? 'Switch to source mode' : 'Switch to live preview'}
-        style={settings.editorMode === 'source' ? { color: 'var(--ember)' } : undefined}
-        onClick={() =>
-          void update({ editorMode: settings.editorMode === 'live' ? 'source' : 'live' })
-        }
-      >
-        <IconCode size={20} />
-      </button>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Formatting commands
-// ---------------------------------------------------------------------------
-
-function wrapSelection(view: EditorView, marker: string): void {
-  const { from, to } = view.state.selection.main;
-  const selected = view.state.sliceDoc(from, to);
-  const n = marker.length;
-  const before = view.state.sliceDoc(Math.max(0, from - n), from);
-  const after = view.state.sliceDoc(to, to + n);
-
-  if (before === marker && after === marker) {
-    view.dispatch({
-      changes: [
-        { from: from - n, to: from, insert: '' },
-        { from: to, to: to + n, insert: '' },
-      ],
-      selection: { anchor: from - n, head: to - n },
-    });
-    return;
-  }
-  view.dispatch({
-    changes: { from, to, insert: `${marker}${selected}${marker}` },
-    selection: selected
-      ? { anchor: from + n, head: to + n }
-      : { anchor: from + n },
-  });
-}
-
-function lineRange(view: EditorView) {
-  const { from } = view.state.selection.main;
-  return view.state.doc.lineAt(from);
-}
-
-function cycleHeading(view: EditorView): void {
-  const line = lineRange(view);
-  const m = /^(#{1,6})\s/.exec(line.text);
-  let next: string;
-  if (!m) next = `# ${line.text}`;
-  else if (m[1].length >= 3) next = line.text.replace(/^#{1,6}\s/, '');
-  else next = `#${line.text}`;
-  view.dispatch({
-    changes: { from: line.from, to: line.to, insert: next },
-    selection: { anchor: line.from + next.length },
-  });
-}
-
-function togglePrefix(view: EditorView, prefix: string): void {
-  const line = lineRange(view);
-  const has = line.text.startsWith(prefix);
-  const next = has ? line.text.slice(prefix.length) : `${prefix}${line.text}`;
-  view.dispatch({
-    changes: { from: line.from, to: line.to, insert: next },
-    selection: { anchor: line.from + next.length },
-  });
-}
-
-function insertWikilink(view: EditorView): void {
-  const { from, to } = view.state.selection.main;
-  const selected = view.state.sliceDoc(from, to);
-  view.dispatch({
-    changes: { from, to, insert: `[[${selected}]]` },
-    selection: { anchor: from + 2 + selected.length },
-  });
-}

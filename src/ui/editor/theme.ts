@@ -52,10 +52,17 @@ export const basaltEditorTheme = EditorView.theme({
 
 export const basaltHighlight = syntaxHighlighting(
   HighlightStyle.define([
-    { tag: tags.heading1, fontSize: '1.5em', fontWeight: '650' },
-    { tag: tags.heading2, fontSize: '1.3em', fontWeight: '650' },
-    { tag: tags.heading3, fontSize: '1.15em', fontWeight: '650' },
-    { tag: [tags.heading4, tags.heading5, tags.heading6], fontWeight: '650' },
+    // Match the reading view (`.md h1…h6`): display font, weight, token sizes —
+    // so headings don't change font when toggling live/source/reading.
+    { tag: tags.heading1, fontFamily: 'var(--font-display)', fontSize: 'var(--text-2xl)', fontWeight: '580' },
+    { tag: tags.heading2, fontFamily: 'var(--font-display)', fontSize: 'var(--text-xl)', fontWeight: '580' },
+    { tag: tags.heading3, fontFamily: 'var(--font-display)', fontSize: 'var(--text-lg)', fontWeight: '580' },
+    {
+      tag: [tags.heading4, tags.heading5, tags.heading6],
+      fontFamily: 'var(--font-display)',
+      fontSize: 'var(--text-body)',
+      fontWeight: '580',
+    },
     { tag: tags.strong, fontWeight: '700' },
     { tag: tags.emphasis, fontStyle: 'italic' },
     { tag: tags.strikethrough, textDecoration: 'line-through', color: 'var(--text-faint)' },

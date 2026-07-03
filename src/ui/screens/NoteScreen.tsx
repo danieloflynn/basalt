@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { parseFrontmatter } from '@/lib/frontmatter';
-import { vaultService } from '@/services';
+import { useSettings, vaultService } from '@/services';
 import { useNav } from '@/state/nav';
 import { IconDots, IconPencil } from '@/ui/icons';
 import { Markdown, scrollToHeading } from '@/ui/markdown/Markdown';
@@ -64,7 +64,12 @@ export function NoteScreen({ path, heading }: { path: string; heading?: string }
           <button
             className="iconbtn"
             aria-label="Edit note"
-            onClick={() => nav.replace({ name: 'edit', path })}
+            onClick={() => {
+              // Sticky: flip the global default so every note opens to edit.
+              nav.setViewMode('editing');
+              void useSettings.getState().update({ defaultView: 'editing' });
+              nav.replace({ name: 'edit', path });
+            }}
           >
             <IconPencil size={20} />
           </button>

@@ -202,6 +202,17 @@ test.describe('editor', () => {
     await expect(page.getByRole('button', { name: 'Bold' })).toBeVisible();
     await expect(page.locator('.bottompill')).toHaveCount(0);
   });
+
+  test('editing toolbar, focused', async ({ page }) => {
+    await onboard(page);
+    await openShowcase(page);
+    await page.getByRole('button', { name: 'Edit note' }).click();
+    await page.locator('.cm-content').waitFor();
+    await page.locator('.cm-content').click();
+    await expect(page.getByRole('button', { name: 'Bold' })).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot('30-editor-toolbar.png');
+  });
 });
 
 test.describe('graph, history, settings', () => {

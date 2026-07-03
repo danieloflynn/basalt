@@ -24,6 +24,8 @@ export interface Settings {
 
   // Editor
   editorMode: 'live' | 'source';
+  /** Sticky default view for opened notes (Obsidian's default-view setting). */
+  defaultView: 'reading' | 'editing';
 
   // Files
   sortOrder: 'name' | 'modified';
@@ -54,6 +56,7 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: 'system',
   fontScale: 1,
   editorMode: 'live',
+  defaultView: 'reading',
   sortOrder: 'name',
   vaults: [],
   activeVault: 'vault',
