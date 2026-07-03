@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { showSoftKeyboard } from '@/lib/keyboard';
 import { noteTitle } from '@/lib/paths';
 import { vaultService } from '@/services';
 import { useNav } from '@/state/nav';
@@ -58,6 +59,7 @@ export function InlineTitle({
     if (!el) return;
     el.focus();
     el.select();
+    showSoftKeyboard(); // programmatic focus alone won't raise it on Android
   }, [autoFocus]);
 
   const commit = async (viaEnter: boolean) => {

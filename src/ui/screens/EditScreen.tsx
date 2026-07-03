@@ -5,6 +5,7 @@ import { openSearchPanel, search, searchKeymap } from '@codemirror/search';
 import { EditorState } from '@codemirror/state';
 import { EditorView, keymap, placeholder } from '@codemirror/view';
 import { useEffect, useRef, useState } from 'react';
+import { showSoftKeyboard } from '@/lib/keyboard';
 import { noteTitle } from '@/lib/paths';
 import { useSettings, useVault, vaultService } from '@/services';
 import { useNav } from '@/state/nav';
@@ -42,6 +43,7 @@ function focusBodyStart(view: EditorView | null): void {
   if (!view) return;
   view.focus();
   view.dispatch({ selection: { anchor: 0 }, scrollIntoView: true });
+  showSoftKeyboard();
 }
 
 export function EditScreen({ path }: { path: string }) {
