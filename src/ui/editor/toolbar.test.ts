@@ -132,6 +132,55 @@ describe('toggleListFamily (family-aware, multi-line)', () => {
   });
 });
 
+describe('toggleListFamily cursor placement', () => {
+  const cursor = (v: EditorView) => v.state.selection.main.head;
+
+  it('puts the caret AFTER the checkbox on an empty line (not left of it)', () => {
+    const v = makeView('', { anchor: 0 });
+    toggleListFamily(v, 'task');
+    expect(text(v)).toBe('- [ ] ');
+    expect(cursor(v)).toBe('- [ ] '.length);
+  });
+
+  it('puts the caret after the marker when converting from line start', () => {
+    const v = makeView('foo', { anchor: 0 });
+    toggleListFamily(v, 'task');
+    expect(text(v)).toBe('- [ ] foo');
+    expect(cursor(v)).toBe('- [ ] '.length);
+  });
+
+  it('keeps the caret anchored to the content mid-line', () => {
+    // caret after "fo" — must still sit after "fo" once the marker is added.
+    const v = makeView('foo', { anchor: 2 });
+    toggleListFamily(v, 'task');
+    expect(text(v)).toBe('- [ ] foo');
+    expect(cursor(v)).toBe('- [ ] fo'.length);
+  });
+
+  it('keeps the caret at the content when toggling a task OFF', () => {
+    const doc = '- [ ] foo';
+    const v = makeView(doc, { anchor: doc.length });
+    toggleListFamily(v, 'task');
+    expect(text(v)).toBe('foo');
+    expect(cursor(v)).toBe('foo'.length);
+  });
+
+  it('does not disturb typing position when converting bullet -> task', () => {
+    const doc = '- foo';
+    const v = makeView(doc, { anchor: doc.length });
+    toggleListFamily(v, 'task');
+    expect(text(v)).toBe('- [ ] foo');
+    expect(cursor(v)).toBe('- [ ] foo'.length);
+  });
+
+  it('lands after "> " when quoting an empty line', () => {
+    const v = makeView('', { anchor: 0 });
+    toggleQuote(v);
+    expect(text(v)).toBe('> ');
+    expect(cursor(v)).toBe(2);
+  });
+});
+
 describe('parseListLine', () => {
   it('recognizes a task at end-of-line (no trailing space)', () => {
     expect(parseListLine('- [ ]')).toMatchObject({ kind: 'task', checked: false, content: '' });

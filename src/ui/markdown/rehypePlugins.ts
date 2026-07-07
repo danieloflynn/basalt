@@ -181,15 +181,29 @@ function paraIsEmpty(p: Element): boolean {
  * can toggle the exact checkbox in the underlying markdown (E-6).
  */
 export function rehypeTasks() {
+  const findCheckbox = (host: Element): Element | undefined =>
+    host.children.find(
+      (c): c is Element =>
+        c.type === 'element' && c.tagName === 'input' &&
+        (c.properties?.type === 'checkbox' || c.properties?.type === undefined),
+    );
+
   return (tree: Root) => {
     visit(tree, 'element', (node: Element) => {
       if (node.tagName !== 'li') return;
-      const input = node.children.find(
-        (c): c is Element =>
-          c.type === 'element' && c.tagName === 'input' &&
-          (c.properties?.type === 'checkbox' || c.properties?.type === undefined),
-      );
-      if (!input || input.tagName !== 'input') return;
+      // Tight list: the checkbox is a direct child. Loose list (blank lines
+      // between items): remark-rehype wraps the item in a <p>, so look inside
+      // the li's first element child too — without this the item kept its
+      // bullet AND rendered the raw disabled checkbox.
+      let input = findCheckbox(node);
+      if (!input) {
+        const firstEl = node.children.find((c): c is Element => c.type === 'element');
+        if (firstEl?.tagName === 'p') {
+          input = findCheckbox(firstEl);
+          if (input) firstEl.children = firstEl.children.filter((c) => c !== input);
+        }
+      }
+      if (!input) return;
 
       const checked = Boolean(input.properties?.checked);
       const line = node.position?.start.line;
@@ -213,8 +227,9 @@ export function rehypeTasks() {
           children: [],
         },
         {
+          // div, not span: loose-list bodies hold <p> children (flow content).
           type: 'element',
-          tagName: 'span',
+          tagName: 'div',
           properties: { className: ['task__body'] },
           children: rest as ElementContent[],
         },

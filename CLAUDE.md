@@ -126,3 +126,13 @@ sync indicator (`.sync-columns`) that glows ember while syncing.
   `useTemplateHandoff` (src/ui/templates.ts), drained by an EditScreen effect.
 - Note embeds are hoisted out of host paragraphs by `rehypeHoistEmbeds`
   (block cards inside `<p>` are invalid nesting) — media embeds stay inline.
+- Checklist behavior lives in `src/lib/tasks.ts` (pure, heavily unit-tested):
+  checking a task sinks it below its siblings, unchecking floats it above the
+  checked run (`sortCheckedToBottom` setting, default on; reading-view taps in
+  NoteScreen, live-preview taps in CheckboxWidget). Two invariants: a no-op
+  toggle must NEVER rewrite untouched lines (gap/ordinal normalization only
+  happens when something actually moved), and a live-preview tap is ONE
+  transaction (sort computed on the would-be text, single dispatch = single
+  undo). Group/block boundary rules (thematic breaks, lazy continuations,
+  paragraph-interrupting blocks) are encoded in blockEnd — extend there, with
+  a regression test per rule.

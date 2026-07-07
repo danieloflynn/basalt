@@ -287,17 +287,17 @@ export function parseListLine(text: string): ParsedLine {
   return { indent: m[1], kind: 'plain', checked: false, content: m[2] };
 }
 
-/** Render a parsed line as the target family (ordinal only used for numbered). */
-function renderLine(p: ParsedLine, target: LineKind, ordinal: number): string {
+/** Render a parsed line's marker prefix as the target family (ordinal only used for numbered). */
+function renderPrefix(p: ParsedLine, target: LineKind, ordinal: number): string {
   switch (target) {
     case 'bullet':
-      return `${p.indent}- ${p.content}`;
+      return `${p.indent}- `;
     case 'task':
-      return `${p.indent}- [${p.checked ? 'x' : ' '}] ${p.content}`;
+      return `${p.indent}- [${p.checked ? 'x' : ' '}] `;
     case 'numbered':
-      return `${p.indent}${ordinal}. ${p.content}`;
+      return `${p.indent}${ordinal}. `;
     case 'plain':
-      return `${p.indent}${p.content}`;
+      return p.indent;
   }
 }
 
@@ -322,8 +322,23 @@ export function toggleListFamily(view: EditorView, target: ListFamily): void {
   const turnOff = nonBlank.length > 0 && nonBlank.every((l) => parseListLine(l.text).kind === target);
 
   const changes: { from: number; to: number; insert: string }[] = [];
-  const replace = (line: Line, text: string) => {
-    if (text !== line.text) changes.push({ from: line.from, to: line.to, insert: text });
+  // Replace ONLY the marker prefix, never the content: the caret keeps its
+  // place in the text, and mapping it forward (assoc 1, below) lands it after
+  // a marker inserted at its position instead of stranding it on the left.
+  const replacePrefix = (line: Line, p: ParsedLine, kind: LineKind, ordinal = 1) => {
+    const insert = renderPrefix(p, kind, ordinal);
+    const oldLen = line.text.length - p.content.length;
+    if (line.text.slice(0, oldLen) !== insert) {
+      changes.push({ from: line.from, to: line.from + oldLen, insert });
+    }
+  };
+  // Seed a marker on a lone empty line so a fresh list can be started.
+  const seed = (line: Line, kind: LineKind, ordinal = 1) => {
+    changes.push({
+      from: line.from,
+      to: line.to,
+      insert: renderPrefix({ indent: '', kind: 'plain', checked: false, content: '' }, kind, ordinal),
+    });
   };
 
   if (target === 'numbered' && !turnOff) {
@@ -338,27 +353,29 @@ export function toggleListFamily(view: EditorView, target: ListFamily): void {
       const line = doc.line(n);
       const inSelection = n >= firstNum && n <= lastNum;
       if (line.text.trim() === '') {
-        if (inSelection && selected.length === 1) replace(line, `${ordinal++}. `);
+        if (inSelection && selected.length === 1) seed(line, 'numbered', ordinal++);
         continue;
       }
       const p = parseListLine(line.text);
-      if (inSelection || p.kind === 'numbered') replace(line, renderLine(p, 'numbered', ordinal++));
+      if (inSelection || p.kind === 'numbered') replacePrefix(line, p, 'numbered', ordinal++);
     }
   } else {
     for (const line of selected) {
       if (line.text.trim() === '') {
-        // Seed a marker on a lone empty line so a fresh list can be started.
-        if (!turnOff && selected.length === 1) {
-          replace(line, renderLine({ indent: '', kind: 'plain', checked: false, content: '' }, target, 1));
-        }
+        if (!turnOff && selected.length === 1) seed(line, target);
         continue;
       }
-      const p = parseListLine(line.text);
-      replace(line, renderLine(p, turnOff ? 'plain' : target, 1));
+      replacePrefix(line, parseListLine(line.text), turnOff ? 'plain' : target);
     }
   }
 
-  if (changes.length > 0) view.dispatch({ changes });
+  if (changes.length > 0) {
+    const set = view.state.changes(changes);
+    view.dispatch({
+      changes: set,
+      selection: { anchor: set.mapPos(range.anchor, 1), head: set.mapPos(range.head, 1) },
+    });
+  }
 }
 
 /** Toggle a `> ` blockquote prefix over every selected line. */
@@ -382,7 +399,13 @@ export function toggleQuote(view: EditorView): void {
       changes.push({ from: line.from, to: line.from, insert: '> ' });
     }
   }
-  if (changes.length > 0) view.dispatch({ changes });
+  if (changes.length > 0) {
+    const set = view.state.changes(changes);
+    view.dispatch({
+      changes: set,
+      selection: { anchor: set.mapPos(range.anchor, 1), head: set.mapPos(range.head, 1) },
+    });
+  }
 }
 
 function insertWikilink(view: EditorView): void {

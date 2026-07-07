@@ -262,3 +262,66 @@ test('an editing-mode heading link reroutes into the editor with the caret on th
   await expect(page.locator('.cm-line', { hasText: 'Architecture' })).toHaveText('## Architecture');
   await expect(page.locator('.cm-line', { hasText: 'Why' }).first()).toHaveText('Why');
 });
+
+// ---------------------------------------------------------------------------
+// Checklists (bug notes round 3): toolbar caret, loose lists in reading view,
+// checked items sinking to the bottom of their list.
+// ---------------------------------------------------------------------------
+
+test('toolbar Task puts the caret after the checkbox; checking an item sinks it', async ({
+  page,
+}) => {
+  await onboard(page);
+  await newNoteFocused(page);
+
+  // Toolbar Task on the empty line seeds "- [ ] " with the caret to its RIGHT:
+  // typing must land after the box, and Enter continues the list.
+  await page.getByRole('button', { name: 'Task', exact: true }).click();
+  await page.keyboard.type('alpha');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('beta');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('gamma');
+
+  const content = () => body(page).evaluate((el) => el.textContent ?? '');
+  expect(await content()).toContain('alpha'); // caret fix: not "alpha- [ ]"
+  expect((await content()).indexOf('alpha')).toBeLessThan((await content()).indexOf('beta'));
+
+  // Tap alpha's checkbox (an inactive line renders the widget): it checks off
+  // and sinks below gamma. The moved line inherits the caret, so live preview
+  // shows its raw "- [x]" markers rather than a widget.
+  await page.locator('.lp-checkbox').first().click();
+  await expect(body(page)).toContainText('[x] alpha');
+  const after = await content();
+  expect(after.indexOf('beta')).toBeLessThan(after.indexOf('gamma'));
+  expect(after.indexOf('gamma')).toBeLessThan(after.indexOf('alpha')); // alpha sank
+});
+
+test('a LOOSE checklist renders tappable boxes in reading view — no bullet, no raw checkbox', async ({
+  page,
+}) => {
+  await onboard(page);
+  await newNoteFocused(page);
+
+  // "- [ ] alpha", blank line, "- [ ] beta": a LOOSE list. insertText bypasses
+  // the list-continuation and bracket-closing keymaps.
+  await page.keyboard.insertText('- [ ] alpha\n\n- [ ] beta');
+  await expect(body(page)).toContainText('beta');
+
+  // Let the autosave flush before leaving the editor (status leaves "Editing…").
+  await expect(page.locator('.workspace-top__status')).not.toHaveText('Editing…');
+  await page.getByRole('button', { name: 'Reading view' }).click();
+  const tasks = page.locator('.md li.task');
+  await expect(tasks).toHaveCount(2);
+  // The regression: loose items kept their list bullet AND showed GFM's raw
+  // disabled <input> beside the styled box.
+  await expect(page.locator('.md input')).toHaveCount(0);
+  await expect(page.locator('.md .task__box')).toHaveCount(2);
+
+  // Tapping alpha's box checks it and sinks it below beta.
+  await page.locator('.md .task__box').first().click();
+  await expect(page.locator('.md li.task[data-checked="true"]')).toHaveCount(1);
+  await expect(tasks.last()).toHaveAttribute('data-checked', 'true');
+  await expect(tasks.first()).toContainText('beta');
+  await expect(tasks.last()).toContainText('alpha');
+});

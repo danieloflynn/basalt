@@ -27,6 +27,8 @@ export interface Settings {
   editorMode: 'live' | 'source';
   /** Sticky default view for opened notes (the app's default-view setting). */
   defaultView: 'reading' | 'editing';
+  /** Checking a task moves it below its unchecked siblings (reading view + live preview taps). */
+  sortCheckedToBottom: boolean;
 
   // Templates
   /** Vault-relative folder holding template notes (blank falls back to `templates`). */
@@ -71,6 +73,7 @@ export const DEFAULT_SETTINGS: Settings = {
   fontScale: 1,
   editorMode: 'live',
   defaultView: 'reading',
+  sortCheckedToBottom: true,
   templateFolder: 'templates',
   newNoteLocation: 'root',
   newNoteFolderPath: '',

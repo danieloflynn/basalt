@@ -8,6 +8,7 @@ import {
   type ViewUpdate,
   WidgetType,
 } from '@codemirror/view';
+import { sortToggledTask } from '@/lib/tasks';
 import { wikilinkDisplayText } from '@/lib/wikilinks';
 
 /**
@@ -15,6 +16,15 @@ import { wikilinkDisplayText } from '@/lib/wikilinks';
  * cursor is on (Obsidian's behaviour), renders checkboxes as tappable boxes,
  * and collapses [[wikilinks]] to their display text.
  */
+
+export interface LivePreviewOptions {
+  /**
+   * Read the "checking a task sinks it below its siblings" setting at tap
+   * time. Injected by the host screen so this module stays free of the
+   * services import graph (and headlessly testable).
+   */
+  sortOnToggle?: () => boolean;
+}
 
 /** Node names whose text is pure syntax and should be hidden when inactive. */
 const HIDDEN_MARKS = new Set([
@@ -52,6 +62,7 @@ class CheckboxWidget extends WidgetType {
   constructor(
     private checked: boolean,
     private pos: number,
+    private sortOnToggle?: () => boolean,
   ) {
     super();
   }
@@ -70,7 +81,27 @@ class CheckboxWidget extends WidgetType {
     box.onclick = (e) => {
       e.preventDefault();
       const mark = this.checked ? ' ' : 'x';
-      view.dispatch({ changes: { from: this.pos + 1, to: this.pos + 2, insert: mark } });
+      const toggle = { from: this.pos + 1, to: this.pos + 2, insert: mark };
+      if (this.sortOnToggle?.()) {
+        // Sort against the would-be text so the tap is ONE transaction (a
+        // single undo step). The toggle is a same-length single-line edit, so
+        // the region's line offsets are identical in the current doc.
+        const doc = view.state.doc;
+        const text = doc.toString();
+        const toggled = text.slice(0, toggle.from) + mark + text.slice(toggle.to);
+        const region = sortToggledTask(toggled, doc.lineAt(this.pos).number);
+        if (region) {
+          view.dispatch({
+            changes: {
+              from: doc.line(region.startLine).from,
+              to: doc.line(region.endLine).to,
+              insert: region.lines.join('\n'),
+            },
+          });
+          return;
+        }
+      }
+      view.dispatch({ changes: toggle });
     };
     return box;
   }
@@ -119,7 +150,7 @@ class LinkTextWidget extends WidgetType {
   }
 }
 
-export function buildDecorations(view: EditorView): DecorationSet {
+export function buildDecorations(view: EditorView, options: LivePreviewOptions = {}): DecorationSet {
   const decorations: Range<Decoration>[] = [];
   const { state } = view;
   const cursorLine = state.doc.lineAt(state.selection.main.head).number;
@@ -246,10 +277,9 @@ export function buildDecorations(view: EditorView): DecorationSet {
         const boxStart = markerStart + marker.length + gap.length;
         const checked = task[1] !== ' ';
         decorations.push(
-          Decoration.replace({ widget: new CheckboxWidget(checked, boxStart) }).range(
-            markerStart,
-            contentEnd,
-          ),
+          Decoration.replace({
+            widget: new CheckboxWidget(checked, boxStart, options.sortOnToggle),
+          }).range(markerStart, contentEnd),
         );
         if (checked && contentEnd < line.to) {
           decorations.push(Decoration.mark({ class: 'lp-done' }).range(contentEnd, line.to));
@@ -268,19 +298,19 @@ export function buildDecorations(view: EditorView): DecorationSet {
   );
 }
 
-export function livePreview(): Extension {
+export function livePreview(options: LivePreviewOptions = {}): Extension {
   return [
     ViewPlugin.fromClass(
       class {
         decorations: DecorationSet;
 
         constructor(view: EditorView) {
-          this.decorations = buildDecorations(view);
+          this.decorations = buildDecorations(view, options);
         }
 
         update(u: ViewUpdate) {
           if (u.docChanged || u.selectionSet || u.viewportChanged) {
-            this.decorations = buildDecorations(u.view);
+            this.decorations = buildDecorations(u.view, options);
           }
         }
       },

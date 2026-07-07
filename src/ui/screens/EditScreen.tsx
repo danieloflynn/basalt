@@ -146,7 +146,13 @@ export function EditScreen({ path }: { path: string }) {
             markdown({ base: markdownLanguage, extensions: [frontmatter] }),
             basaltEditorTheme,
             basaltHighlight,
-            ...(editorMode === 'live' ? [livePreview()] : []),
+            ...(editorMode === 'live'
+              ? [
+                  livePreview({
+                    sortOnToggle: () => useSettings.getState().settings.sortCheckedToBottom,
+                  }),
+                ]
+              : []),
             search({ top: true }),
             closeBrackets(),
             autocompletion({ override: [wikilinkCompletions], icons: false }),

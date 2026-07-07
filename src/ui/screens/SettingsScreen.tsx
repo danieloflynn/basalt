@@ -168,6 +168,12 @@ export function SettingsScreen() {
               value={settings.editorMode}
               onChange={(v) => void update({ editorMode: v })}
             />
+            <ToggleSetting
+              label="Move checked items down"
+              desc="Checking off a task moves it below the unchecked items in its list"
+              value={settings.sortCheckedToBottom}
+              onChange={(v) => void update({ sortCheckedToBottom: v })}
+            />
           </div>
         </div>
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { parseFrontmatter } from '@/lib/frontmatter';
+import { applyTaskSort, sortToggledTask, toggleTaskAtLine } from '@/lib/tasks';
 import { useSettings, vaultService } from '@/services';
 import { useNav } from '@/state/nav';
 import { IconDots, IconPencil } from '@/ui/icons';
@@ -44,8 +45,12 @@ export function NoteScreen({ path, heading }: { path: string; heading?: string }
   const toggleTask = useCallback(
     (line: number) => {
       if (text === null) return;
-      const updated = toggleTaskAtLine(text, line);
+      let updated = toggleTaskAtLine(text, line);
       if (updated === null) return;
+      if (useSettings.getState().settings.sortCheckedToBottom) {
+        const region = sortToggledTask(updated, line);
+        if (region) updated = applyTaskSort(updated, region);
+      }
       setText(updated);
       void vaultService.writeNote(path, updated);
     },
@@ -133,20 +138,4 @@ function formatValue(v: unknown): string {
   if (v instanceof Date) return v.toISOString().slice(0, 10);
   if (typeof v === 'object') return JSON.stringify(v);
   return String(v);
-}
-
-/** Flip "- [ ]" <-> "- [x]" on the given 1-based line of the full note text. */
-export function toggleTaskAtLine(text: string, line: number): string | null {
-  const lines = text.split('\n');
-  const i = line - 1;
-  if (i < 0 || i >= lines.length) return null;
-  const current = lines[i];
-  const toggled = current.replace(
-    /^(\s*(?:[-*+]|\d+[.)])\s+\[)([ xX])(\])/,
-    (_, pre: string, mark: string, post: string) =>
-      `${pre}${mark === ' ' ? 'x' : ' '}${post}`,
-  );
-  if (toggled === current) return null;
-  lines[i] = toggled;
-  return lines.join('\n');
 }
