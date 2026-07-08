@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractArtifactLinks } from './artifactLinks';
+import { extractArtifactLinks, injectArtifactBridge } from './artifactLinks';
 import { diffLines } from './diff';
 import { parseFrontmatter, serializeFrontmatter } from './frontmatter';
 import { extractBlock, extractOutline, removeComments, slugifyHeading } from './outline';
@@ -148,6 +148,18 @@ describe('extractArtifactLinks', () => {
 
   it('returns nothing for link-free documents', () => {
     expect(extractArtifactLinks('<h1>Hi</h1><p>plain</p>')).toEqual([]);
+  });
+
+  it('injects the click bridge into <head>, or prepends without one', () => {
+    const withHead = injectArtifactBridge('<html><head><title>x</title></head><body/></html>');
+    expect(withHead.indexOf('basalt:link')).toBeGreaterThan(withHead.indexOf('<head>'));
+    expect(withHead.indexOf('basalt:link')).toBeLessThan(withHead.indexOf('<title>'));
+
+    const bare = injectArtifactBridge('<h1>Hi</h1>');
+    expect(bare.startsWith('<script>')).toBe(true);
+    expect(bare.endsWith('<h1>Hi</h1>')).toBe(true);
+    // The injected script must terminate itself properly.
+    expect(bare).toContain('</script>');
   });
 });
 

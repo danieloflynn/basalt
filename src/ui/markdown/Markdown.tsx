@@ -25,6 +25,7 @@ import {
 import { openFileExternally } from '@/engine';
 import { vaultService } from '@/services';
 import { openNote, useNav } from '@/state/nav';
+import { ArtifactFrame } from '@/ui/components/ArtifactFrame';
 import { IconCheck, IconImage, IconNote } from '@/ui/icons';
 import {
   rehypeCallouts,
@@ -342,12 +343,7 @@ function HtmlEmbed({ path }: { path: string }) {
       {html === null ? (
         <span className="artifact-frame--embed" style={{ display: 'block' }} />
       ) : (
-        <iframe
-          className="artifact-frame--embed"
-          title={title}
-          sandbox="allow-scripts allow-forms allow-modals allow-popups"
-          srcDoc={html}
-        />
+        <ArtifactFrame path={path} html={html} className="artifact-frame--embed" />
       )}
     </span>
   );

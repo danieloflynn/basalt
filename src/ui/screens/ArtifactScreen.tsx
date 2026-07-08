@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { noteTitle } from '@/lib/paths';
 import { vaultService } from '@/services';
+import { ArtifactFrame } from '@/ui/components/ArtifactFrame';
 import { IconSync } from '@/ui/icons';
 import { SidebarToggle } from '@/ui/workspace/chrome';
 import { usePullDown } from '@/ui/hooks/usePullDown';
@@ -63,13 +64,7 @@ export function ArtifactScreen({ path }: { path: string }) {
       )}
       {error === null && html === null && <div className="state" />}
       {error === null && html !== null && (
-        <iframe
-          key={generation}
-          className="artifact-frame"
-          title={noteTitle(path)}
-          sandbox="allow-scripts allow-forms allow-modals allow-popups"
-          srcDoc={html}
-        />
+        <ArtifactFrame key={generation} path={path} html={html} className="artifact-frame" />
       )}
     </div>
   );

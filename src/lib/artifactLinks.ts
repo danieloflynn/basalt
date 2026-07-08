@@ -1,6 +1,36 @@
 import { parseWikilinks } from './wikilinks';
 
 /**
+ * Click bridge injected into every rendered artifact. The iframe has no
+ * same-origin access, so link taps are relayed to the app via postMessage;
+ * the app decides what a href means (vault note, artifact, external URL).
+ * In-page #fragment anchors keep their native behavior, and the artifact's
+ * own click handlers still run — only default navigation is prevented.
+ */
+const BRIDGE_SCRIPT = `<script>
+(function () {
+  document.addEventListener('click', function (e) {
+    var el = e.target instanceof Element ? e.target.closest('a[href]') : null;
+    if (!el) return;
+    var href = el.getAttribute('href') || '';
+    if (!href || href.charAt(0) === '#') return;
+    e.preventDefault();
+    try { window.parent.postMessage({ type: 'basalt:link', href: href }, '*'); } catch (err) {}
+  }, true);
+})();
+<\/script>`;
+
+/** Prepare artifact HTML for the sandboxed frame: install the click bridge. */
+export function injectArtifactBridge(html: string): string {
+  const head = /<head[^>]*>/i.exec(html);
+  if (head) {
+    const at = head.index + head[0].length;
+    return html.slice(0, at) + BRIDGE_SCRIPT + html.slice(at);
+  }
+  return BRIDGE_SCRIPT + html;
+}
+
+/**
  * Raw link targets inside an HTML artifact, for the vault link graph:
  * `href` values of `<a>` tags plus any `[[wikilinks]]` in the source (so an
  * artifact can reference notes invisibly, e.g. from an HTML comment).

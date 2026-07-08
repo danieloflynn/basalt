@@ -71,6 +71,24 @@ test.describe('html artifacts', () => {
     await expect(page.locator('.workspace-top__status')).toHaveText('Sync Pulse');
   });
 
+  test('tapping a vault link inside an artifact opens the note in-app', async ({ page }) => {
+    await onboard(page);
+    await openFileTree(page);
+    await treeRow(page, 'Sync Pulse html').click();
+
+    // The artifact's footer has <a href="Welcome.md">; the injected bridge
+    // relays the tap out of the sandbox and the app opens the note.
+    await page
+      .frameLocator('.artifact-frame')
+      .getByRole('link', { name: 'Welcome' })
+      .click();
+    await expect(page.getByRole('textbox', { name: 'Note title' })).toHaveValue('Welcome');
+
+    // Back returns to the artifact.
+    await page.locator('.bottompill').getByRole('button', { name: 'Back' }).click();
+    await expect(page.locator('.artifact-frame')).toBeVisible();
+  });
+
   test('artifact links join the graph data: they list as backlinks on the target note', async ({
     page,
   }) => {
