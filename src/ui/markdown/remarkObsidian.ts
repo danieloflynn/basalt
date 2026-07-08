@@ -1,6 +1,6 @@
 import type { Parent, PhrasingContent, Root, Text } from 'mdast';
 import { visit } from 'unist-util-visit';
-import { isAudioPath, isImagePath, isPdfPath, isVideoPath } from '@/lib/paths';
+import { isAudioPath, isHtmlPath, isImagePath, isPdfPath, isVideoPath } from '@/lib/paths';
 import { parseWikilinkInner, wikilinkDisplayText } from '@/lib/wikilinks';
 
 const TOKEN =
@@ -14,7 +14,7 @@ const SIZE_ALIAS = /^(\d+)(?:x(\d+))?$/;
  *   [[Note]]        -> <a class="wikilink" data-target="Note">
  *   ![[Note]]       -> <a data-embed data-target="Note">  (transclusion)
  *   ![[img.png]]    -> <img data-vault-src="img.png">
- *   ![[song.mp3]]   -> <a data-media data-target>          (audio/video/pdf)
+ *   ![[song.mp3]]   -> <a data-media data-target>          (audio/video/pdf/html)
  *   ==highlight==   -> <mark>
  *   #tag            -> <a class="tag" data-tag="tag">
  */
@@ -67,7 +67,13 @@ export function remarkObsidian() {
               },
             },
           });
-        } else if (bang && (isAudioPath(link.target) || isVideoPath(link.target) || isPdfPath(link.target))) {
+        } else if (
+          bang &&
+          (isAudioPath(link.target) ||
+            isVideoPath(link.target) ||
+            isPdfPath(link.target) ||
+            isHtmlPath(link.target))
+        ) {
           out.push(
             inlineNode(display, {
               'data-media': 'true',

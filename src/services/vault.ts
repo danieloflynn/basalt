@@ -147,6 +147,18 @@ export class VaultService {
     return text;
   }
 
+  /**
+   * Fresh-from-disk read for non-note files (HTML artifacts). Bypasses the
+   * text cache — the cache only tracks markdown writes, so a cached artifact
+   * could go stale — but refreshes it for embed renders.
+   */
+  async readFileFresh(path: string): Promise<string> {
+    const text = await this.fs.read(path);
+    this.contents.set(path, text);
+    this.touchRecents(path);
+    return text;
+  }
+
   fileUrl(path: string): Promise<string> {
     return this.fs.fileUrl(path);
   }

@@ -12,6 +12,7 @@ import {
 import { currentScreen, openNote, useNav, type Screen } from '@/state/nav';
 import { Banners } from '@/ui/components/Banners';
 import { IconCalendar, IconNotePlus } from '@/ui/icons';
+import { ArtifactScreen } from '@/ui/screens/ArtifactScreen';
 import { GraphScreen } from '@/ui/screens/GraphScreen';
 import { HistoryScreen } from '@/ui/screens/HistoryScreen';
 import { NoteScreen } from '@/ui/screens/NoteScreen';
@@ -130,7 +131,10 @@ export function App() {
 
   const screen = currentScreen(nav);
   const showPill =
-    (screen.name === 'empty' || screen.name === 'note' || screen.name === 'edit') &&
+    (screen.name === 'empty' ||
+      screen.name === 'note' ||
+      screen.name === 'edit' ||
+      screen.name === 'artifact') &&
     !nav.editorFocused; // typing: the format toolbar takes the pill's place
 
   return (
@@ -177,6 +181,8 @@ function WorkspaceScreen({ screen }: { screen: Screen }) {
           <EditScreen key={screen.path} path={screen.path} />
         </Suspense>
       );
+    case 'artifact':
+      return <ArtifactScreen key={screen.path} path={screen.path} />;
     case 'settings':
       return <SettingsScreen />;
     case 'history':

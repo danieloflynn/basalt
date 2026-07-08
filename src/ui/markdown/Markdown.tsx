@@ -15,10 +15,12 @@ import {
   basename,
   dirname,
   isAudioPath,
+  isHtmlPath,
   isMarkdownPath,
   isPdfPath,
   isVideoPath,
   normalizePath,
+  noteTitle,
 } from '@/lib/paths';
 import { openFileExternally } from '@/engine';
 import { vaultService } from '@/services';
@@ -123,7 +125,12 @@ function SmartAnchor(props: ComponentProps<'a'>) {
             if (isCreatableTarget(target)) void createNoteFromLink(target);
             return;
           }
-          if (!isMarkdownPath(resolved)) return;
+          if (!isMarkdownPath(resolved)) {
+            if (isHtmlPath(resolved)) {
+              useNav.getState().push({ name: 'artifact', path: resolved });
+            }
+            return;
+          }
           if (resolved === ctx.path && heading) {
             scrollToHeading(heading);
           } else {
@@ -149,7 +156,11 @@ function SmartAnchor(props: ComponentProps<'a'>) {
           return;
         }
         const resolved = vaultService.resolveLink(decodeURIComponent(href), ctx.path);
-        if (resolved && isMarkdownPath(resolved)) openNote(resolved);
+        if (!resolved) return;
+        if (isMarkdownPath(resolved)) openNote(resolved);
+        else if (isHtmlPath(resolved)) {
+          useNav.getState().push({ name: 'artifact', path: resolved });
+        }
       }}
     >
       {props.children}
@@ -221,7 +232,10 @@ function VaultImage(props: ComponentProps<'img'>) {
   );
 }
 
-/** ![[file.mp3]] / ![[clip.mp4]] inline players; ![[doc.pdf]] opens externally. */
+/**
+ * ![[file.mp3]] / ![[clip.mp4]] inline players; ![[doc.pdf]] opens externally;
+ * ![[page.html]] renders a sandboxed artifact frame.
+ */
 function MediaEmbed({ target }: { target: string }) {
   const ctx = useContext(MarkdownContext);
   const resolved = vaultService.resolveLink(target, ctx.path);
@@ -229,7 +243,7 @@ function MediaEmbed({ target }: { target: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    if (!resolved) return;
+    if (!resolved || isHtmlPath(resolved)) return;
     vaultService.fileUrl(resolved).then((u) => {
       if (!cancelled) setUrl(u);
     });
@@ -244,6 +258,10 @@ function MediaEmbed({ target }: { target: string }) {
         Missing file: {target}
       </span>
     );
+  }
+
+  if (isHtmlPath(resolved)) {
+    return <HtmlEmbed path={resolved} />;
   }
 
   if (isAudioPath(resolved)) {
@@ -279,6 +297,60 @@ function MediaEmbed({ target }: { target: string }) {
     );
   }
   return null;
+}
+
+/** ![[page.html]] — the artifact inline, sandboxed, with a jump to the full viewer. */
+function HtmlEmbed({ path }: { path: string }) {
+  const [html, setHtml] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const title = noteTitle(path);
+
+  useEffect(() => {
+    let cancelled = false;
+    vaultService
+      .readNote(path)
+      .then((t) => {
+        if (!cancelled) setHtml(t);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [path]);
+
+  if (failed) {
+    return (
+      <span className="embed embed--broken" style={{ display: 'block' }}>
+        Missing file: {path}
+      </span>
+    );
+  }
+  return (
+    <span className="embed embed--artifact" style={{ display: 'block' }}>
+      <span className="embed__title embed__title--artifact">
+        {title}
+        <button
+          type="button"
+          className="embed__open"
+          onClick={() => useNav.getState().push({ name: 'artifact', path })}
+        >
+          Open
+        </button>
+      </span>
+      {html === null ? (
+        <span className="artifact-frame--embed" style={{ display: 'block' }} />
+      ) : (
+        <iframe
+          className="artifact-frame--embed"
+          title={title}
+          sandbox="allow-scripts allow-forms allow-modals allow-popups"
+          srcDoc={html}
+        />
+      )}
+    </span>
+  );
 }
 
 function TaskBox(props: ComponentProps<'button'>) {

@@ -82,3 +82,10 @@ sync indicator (`.sync-columns`) that glows ember while syncing.
   `discard`) assumes markdown files are in it. Membership checks go through
   `search.has()`, never the notes map (it's rebuilt from file listings and
   lies about index membership).
+- HTML artifacts: `.html`/`.htm` vault files are first-class. `ArtifactScreen`
+  renders them via a srcdoc iframe sandboxed WITHOUT `allow-same-origin` —
+  artifact scripts run but can never reach the app, the Capacitor bridge, or
+  vault storage. Keep it that way. Tree rows, wikilinks (`[[page.html]]`) and
+  markdown links open the viewer; `![[page.html]]` embeds inline (the
+  `data-media` path in `remarkObsidian`). Artifacts stay out of the notes
+  map / search index / graph — they're files, not notes.

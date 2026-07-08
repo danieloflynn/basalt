@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { dirname, joinPath, noteTitle } from '@/lib/paths';
+import { dirname, extname, isMarkdownPath, joinPath, noteTitle } from '@/lib/paths';
 import type { TreeNode } from '@/lib/tree';
 import { vaultService } from '@/services';
 import { useNav } from '@/state/nav';
@@ -10,12 +10,14 @@ import { Dialog } from './Dialog';
 export function FileActionsSheet({ node, onClose }: { node: TreeNode; onClose: () => void }) {
   const [mode, setMode] = useState<'menu' | 'rename' | 'delete'>('menu');
   const isFolder = node.kind === 'folder';
+  const isNote = !isFolder && isMarkdownPath(node.path);
+  const kind = isFolder ? 'folder' : isNote ? 'note' : 'file';
   const displayName = isFolder ? node.name : noteTitle(node.path);
 
   if (mode === 'rename') {
     return (
       <Dialog
-        title={isFolder ? 'Rename folder' : 'Rename note'}
+        title={`Rename ${kind}`}
         initialValue={displayName}
         confirmLabel="Rename"
         onCancel={onClose}
@@ -23,7 +25,8 @@ export function FileActionsSheet({ node, onClose }: { node: TreeNode; onClose: (
           const clean = name.trim().replace(/[\\/:]/g, '-');
           if (clean && clean !== displayName) {
             const dir = dirname(node.path);
-            const to = isFolder ? joinPath(dir, clean) : joinPath(dir, `${clean}.md`);
+            // Files keep their own extension — .html artifacts stay .html.
+            const to = isFolder ? joinPath(dir, clean) : joinPath(dir, clean + extname(node.path));
             if (isFolder) {
               // Folder rename = rename every file under it (git-friendly).
               for (const f of collectPaths(node)) {
@@ -42,7 +45,7 @@ export function FileActionsSheet({ node, onClose }: { node: TreeNode; onClose: (
   if (mode === 'delete') {
     return (
       <Dialog
-        title={`Delete ${isFolder ? 'folder' : 'note'}?`}
+        title={`Delete ${kind}?`}
         message={
           isFolder
             ? `"${displayName}" and everything inside it will be deleted from the vault. Git history still has it until history is rewritten.`
@@ -87,7 +90,8 @@ export function FileActionsSheet({ node, onClose }: { node: TreeNode; onClose: (
           </span>
           Rename
         </button>
-        {!isFolder && (
+        {/* Duplicate goes through createNote, which is markdown-only. */}
+        {isNote && (
           <button
             className="sheet__item"
             onClick={async () => {

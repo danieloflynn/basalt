@@ -248,6 +248,33 @@ test.describe('graph, history, settings', () => {
   });
 });
 
+test.describe('html artifacts', () => {
+  test('artifact viewer', async ({ page }) => {
+    await onboard(page);
+    await page.getByRole('button', { name: 'Open sidebar' }).click();
+    await page.getByRole('button', { name: 'Sync Pulse html', exact: true }).click();
+    await page
+      .frameLocator('.artifact-frame')
+      .getByRole('button', { name: 'Pulse 0' })
+      .waitFor();
+    await settle(page);
+    await expect(page).toHaveScreenshot('31-artifact-viewer.png');
+  });
+
+  test('inline embed in reading view', async ({ page }) => {
+    await onboard(page);
+    await openShowcase(page);
+    const embed = page.locator('.embed--artifact');
+    await embed.scrollIntoViewIfNeeded();
+    await page
+      .frameLocator('.artifact-frame--embed')
+      .getByRole('button', { name: 'Pulse 0' })
+      .waitFor();
+    await settle(page);
+    await expect(page).toHaveScreenshot('32-artifact-embed.png');
+  });
+});
+
 test.describe('light mode', () => {
   test.use({ colorScheme: 'light' });
 

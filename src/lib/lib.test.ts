@@ -4,7 +4,7 @@ import { parseFrontmatter, serializeFrontmatter } from './frontmatter';
 import { extractBlock, extractOutline, removeComments, slugifyHeading } from './outline';
 import { extractTags } from './tags';
 import { buildTree, walkFiles } from './tree';
-import { dirname, extname, isHiddenPath, joinPath, normalizePath, noteTitle } from './paths';
+import { dirname, extname, isHiddenPath, isHtmlPath, joinPath, normalizePath, noteTitle } from './paths';
 import { LinkResolver, parseWikilinks, wikilinkDisplayText } from './wikilinks';
 import { stripInlineMarkdown } from './plaintext';
 import { claimAxis, drawerProgress, pullTriggered, settleOpen, velocityX } from './gesture';
@@ -22,6 +22,14 @@ describe('paths', () => {
     expect(extname('a/B.PNG')).toBe('.png');
     expect(extname('.gitignore')).toBe('');
     expect(noteTitle('notes/My Note.md')).toBe('My Note');
+  });
+
+  it('classifies HTML artifact paths', () => {
+    expect(isHtmlPath('Artifacts/Sync Pulse.html')).toBe(true);
+    expect(isHtmlPath('page.HTM')).toBe(true);
+    expect(isHtmlPath('note.md')).toBe(false);
+    expect(isHtmlPath('page.html.md')).toBe(false);
+    expect(noteTitle('Artifacts/Sync Pulse.html')).toBe('Sync Pulse');
   });
 
   it('detects hidden paths at any depth', () => {
@@ -100,6 +108,14 @@ describe('LinkResolver', () => {
     expect(resolver.resolve('img.png', 'Inbox.md')).toBe('assets/img.png');
     expect(resolver.resolve('notes/Design', 'projects/Basalt.md')).toBe('projects/notes/Design.md');
     expect(resolver.resolve('Nope', 'Inbox.md')).toBeNull();
+  });
+
+  it('resolves HTML artifacts by bare name with extension', () => {
+    const r = new LinkResolver(['Inbox.md', 'Artifacts/Sync Pulse.html']);
+    expect(r.resolve('Sync Pulse.html', 'Inbox.md')).toBe('Artifacts/Sync Pulse.html');
+    expect(r.resolve('Artifacts/Sync Pulse.html', 'Inbox.md')).toBe('Artifacts/Sync Pulse.html');
+    // Extensionless bare names stay markdown-only (Obsidian behavior).
+    expect(r.resolve('Sync Pulse', 'Inbox.md')).toBeNull();
   });
 
   it('tracks additions and removals', () => {
