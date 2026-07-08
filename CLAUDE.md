@@ -88,4 +88,7 @@ sync indicator (`.sync-columns`) that glows ember while syncing.
   vault storage. Keep it that way. Tree rows, wikilinks (`[[page.html]]`) and
   markdown links open the viewer; `![[page.html]]` embeds inline (the
   `data-media` path in `remarkObsidian`). Artifacts stay out of the notes
-  map / search index / graph — they're files, not notes.
+  map / search index — they're files, not notes — but they ARE graph nodes:
+  `<a href>` targets and `[[wikilinks]]` in the HTML source become edges
+  (`src/lib/artifactLinks.ts`), artifact nodes render in the link color, and
+  backlinks list artifact sources.

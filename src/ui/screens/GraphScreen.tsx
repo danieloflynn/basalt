@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { noteTitle } from '@/lib/paths';
+import { isHtmlPath, noteTitle } from '@/lib/paths';
 import { vaultService } from '@/services';
 import { useNav } from '@/state/nav';
 import { IconBack } from '@/ui/icons';
@@ -7,6 +7,8 @@ import { IconBack } from '@/ui/icons';
 interface GraphNode {
   path: string;
   label: string;
+  /** HTML artifact nodes render in the link color and open the viewer. */
+  artifact: boolean;
   x: number;
   y: number;
   vx: number;
@@ -53,6 +55,7 @@ export function GraphScreen({ path }: { path?: string }) {
     const nodes: GraphNode[] = paths.map((p, i) => ({
       path: p,
       label: noteTitle(p),
+      artifact: isHtmlPath(p),
       x: (rand(i + 1) - 0.5) * 600,
       y: (rand(i + 101) - 0.5) * 600,
       vx: 0,
@@ -69,6 +72,7 @@ export function GraphScreen({ path }: { path?: string }) {
     const styles = getComputedStyle(document.documentElement);
     const colEdge = styles.getPropertyValue('--border-strong').trim() || '#555';
     const colNode = styles.getPropertyValue('--column-rock-lit').trim() || '#888';
+    const colArtifact = styles.getPropertyValue('--link').trim() || '#7fb69a';
     const colActive = styles.getPropertyValue('--ember').trim() || '#e8764a';
     const colText = styles.getPropertyValue('--text-muted').trim() || '#aaa';
 
@@ -154,7 +158,7 @@ export function GraphScreen({ path }: { path?: string }) {
       for (const n of nodes) {
         const r = Math.min(14, 4 + n.degree * 1.5);
         ctx.beginPath();
-        ctx.fillStyle = n.path === path ? colActive : colNode;
+        ctx.fillStyle = n.path === path ? colActive : n.artifact ? colArtifact : colNode;
         ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
         ctx.fill();
         if (scale > 0.55 || nodes.length < 40) {
@@ -210,7 +214,9 @@ export function GraphScreen({ path }: { path?: string }) {
         const gy = (e.clientY - rect.top - oy) / scale;
         for (const n of nodes) {
           if (Math.hypot(n.x - gx, n.y - gy) < 22) {
-            useNav.getState().push({ name: 'note', path: n.path });
+            useNav
+              .getState()
+              .push(n.artifact ? { name: 'artifact', path: n.path } : { name: 'note', path: n.path });
             return;
           }
         }

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { extractArtifactLinks } from './artifactLinks';
 import { diffLines } from './diff';
 import { parseFrontmatter, serializeFrontmatter } from './frontmatter';
 import { extractBlock, extractOutline, removeComments, slugifyHeading } from './outline';
@@ -124,6 +125,29 @@ describe('LinkResolver', () => {
     expect(r.resolve('B', 'A.md')).toBe('B.md');
     r.remove('B.md');
     expect(r.resolve('B', 'A.md')).toBeNull();
+  });
+});
+
+describe('extractArtifactLinks', () => {
+  it('extracts vault-relative hrefs, skipping external, mailto and fragment links', () => {
+    const html = `
+      <a href="Welcome.md">Welcome</a>
+      <a class="x" href='notes/Deep%20Note.md#Heading'>deep</a>
+      <a href="https://example.com/page.md">out</a>
+      <a href="mailto:x@y.z">mail</a>
+      <a href="#section">frag</a>
+    `;
+    expect(extractArtifactLinks(html)).toEqual(['Welcome.md', 'notes/Deep Note.md']);
+  });
+
+  it('finds [[wikilinks]] anywhere in the source and dedupes targets', () => {
+    const html =
+      '<!-- [[Reading List]] --> <a href="Welcome.md">w</a> <a href="Welcome.md">again</a>';
+    expect(extractArtifactLinks(html)).toEqual(['Welcome.md', 'Reading List']);
+  });
+
+  it('returns nothing for link-free documents', () => {
+    expect(extractArtifactLinks('<h1>Hi</h1><p>plain</p>')).toEqual([]);
   });
 });
 

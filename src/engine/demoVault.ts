@@ -160,6 +160,8 @@ Date: {{date}} {{time}}
   .col { flex: 1; border-radius: 6px 6px 2px 2px; background: linear-gradient(180deg, #ff6a2b, #b23a10); transition: height 0.3s ease; }
   button { border: none; border-radius: 999px; padding: 10px 18px; font-size: 14px; font-weight: 600; background: #ff6a2b; color: #131215; }
   #count { font-variant-numeric: tabular-nums; }
+  .foot { margin-top: 24px; font-size: 12px; color: #6f6b64; }
+  .foot a { color: #8fbfa5; }
 </style>
 </head>
 <body>
@@ -167,6 +169,8 @@ Date: {{date}} {{time}}
   <p>A self-contained HTML artifact living in the vault, rendered in a sandbox.</p>
   <div class="cols" id="cols"></div>
   <button id="pulse">Pulse <span id="count">0</span></button>
+  <!-- Vault links (they show up in the graph): <a href="Welcome.md"> and [[Reading List]] -->
+  <p class="foot">Part of the <a href="Welcome.md">Welcome</a> tour.</p>
   <script>
     var heights = [42, 78, 56, 96];
     var cols = document.getElementById('cols');

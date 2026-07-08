@@ -71,6 +71,24 @@ test.describe('html artifacts', () => {
     await expect(page.locator('.workspace-top__status')).toHaveText('Sync Pulse');
   });
 
+  test('artifact links join the graph data: they list as backlinks on the target note', async ({
+    page,
+  }) => {
+    await onboard(page);
+    await openFileTree(page);
+    await treeRow(page, 'Welcome').click();
+    await expect(page.getByRole('textbox', { name: 'Note title' })).toBeVisible();
+
+    // Sync Pulse links here via <a href="Welcome.md"> in its HTML source.
+    await page.getByRole('button', { name: 'Note menu' }).click();
+    await page.locator('.sheet').getByRole('button', { name: 'Backlinks' }).click();
+    await page.locator('.sheet').getByRole('button', { name: /Sync Pulse/ }).click();
+
+    // Tapping the artifact backlink opens the viewer.
+    await expect(page.locator('.artifact-frame')).toBeVisible();
+    await expect(page.locator('.workspace-top__status')).toHaveText('Sync Pulse');
+  });
+
   test('artifact tabs are labeled by name; tree row highlights the active artifact', async ({
     page,
   }) => {
