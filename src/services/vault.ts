@@ -6,7 +6,8 @@ import { extractOutline, type HeadingInfo } from '@/lib/outline';
 import { extractTags, stripCode } from '@/lib/tags';
 import { stripInlineMarkdown } from '@/lib/plaintext';
 import { buildTree, type TreeFolder } from '@/lib/tree';
-import { dirname, isHiddenPath, isMarkdownPath, joinPath, noteTitle } from '@/lib/paths';
+import { extractArtifactLinks } from '@/lib/artifactLinks';
+import { dirname, isHiddenPath, isHtmlPath, isMarkdownPath, joinPath, noteTitle } from '@/lib/paths';
 import { LinkResolver, parseWikilinks } from '@/lib/wikilinks';
 import { rewriteWikilinks } from '@/lib/wikilinkRewrite';
 
@@ -92,8 +93,11 @@ export class VaultService {
   /** Full (re)build from disk — startup and after sync pulls remote changes. */
   async initialize(): Promise<void> {
     const files = await this.fs.list();
-    const mdPaths = files.map((f) => f.path).filter((p) => isMarkdownPath(p) && !isHiddenPath(p));
-    const contents = await this.fs.readMany(mdPaths);
+    // Markdown for the notes/search index; HTML artifacts for the link graph.
+    const textPaths = files
+      .map((f) => f.path)
+      .filter((p) => (isMarkdownPath(p) || isHtmlPath(p)) && !isHiddenPath(p));
+    const contents = await this.fs.readMany(textPaths);
 
     this.resolver = new LinkResolver(files.map((f) => f.path).filter((p) => !isHiddenPath(p)));
     this.contents = new Map(Object.entries(contents));
@@ -143,6 +147,19 @@ export class VaultService {
     const cached = this.contents.get(path);
     const text = cached ?? (await this.fs.read(path));
     this.contents.set(path, text);
+    this.touchRecents(path);
+    return text;
+  }
+
+  /**
+   * Fresh-from-disk read for non-note files (HTML artifacts). Bypasses the
+   * text cache — the cache only tracks markdown writes, so a cached artifact
+   * could go stale — but refreshes it for embed renders.
+   */
+  async readFileFresh(path: string): Promise<string> {
+    const text = await this.fs.read(path);
+    this.contents.set(path, text);
+    if (this.isGraphNode(path)) this.setOutgoing(path, text); // links may have changed
     this.touchRecents(path);
     return text;
   }
@@ -335,18 +352,37 @@ export class VaultService {
   // Link graph (backlinks, graph view)
   // ------------------------------------------------------------------
 
+  /** Notes and HTML artifacts are graph nodes; attachments are not. */
+  private isGraphNode(p: string): boolean {
+    return (isMarkdownPath(p) || isHtmlPath(p)) && !isHiddenPath(p);
+  }
+
   private linksIn(path: string, text: string): Set<string> {
+    return isHtmlPath(path) ? this.artifactLinksIn(path, text) : this.markdownLinksIn(path, text);
+  }
+
+  private markdownLinksIn(path: string, text: string): Set<string> {
     const out = new Set<string>();
     const body = stripCode(parseFrontmatter(text).body);
     for (const link of parseWikilinks(body)) {
       const resolved = this.resolver.resolve(link.target, path);
-      if (resolved && resolved !== path && isMarkdownPath(resolved)) out.add(resolved);
+      if (resolved && resolved !== path && this.isGraphNode(resolved)) out.add(resolved);
     }
     for (const m of body.matchAll(/(^|[^!])\[[^\]]*\]\(([^)\s]+)\)/g)) {
       const href = m[2];
       if (/^[a-z][a-z0-9+.-]*:/i.test(href)) continue;
       const resolved = this.resolver.resolve(decodeURIComponent(href), path);
-      if (resolved && resolved !== path && isMarkdownPath(resolved)) out.add(resolved);
+      if (resolved && resolved !== path && this.isGraphNode(resolved)) out.add(resolved);
+    }
+    return out;
+  }
+
+  /** Artifact edges: <a href> targets and [[wikilinks]] in the HTML source. */
+  private artifactLinksIn(path: string, html: string): Set<string> {
+    const out = new Set<string>();
+    for (const target of extractArtifactLinks(html)) {
+      const resolved = this.resolver.resolve(target, path);
+      if (resolved && resolved !== path && this.isGraphNode(resolved)) out.add(resolved);
     }
     return out;
   }
@@ -368,7 +404,7 @@ export class VaultService {
     this.outgoing.clear();
     this.backlinks.clear();
     for (const [path, text] of this.contents) {
-      if (!isMarkdownPath(path) || isHiddenPath(path)) continue;
+      if (!this.isGraphNode(path)) continue;
       this.setOutgoing(path, text);
     }
   }
@@ -392,9 +428,13 @@ export class VaultService {
     return [...(this.outgoing.get(path) ?? [])];
   }
 
-  /** Full resolved link graph — nodes are note paths (for the graph view). */
+  /** Full resolved link graph — notes plus HTML artifacts (for the graph view). */
   linkGraph(): { nodes: string[]; edges: [string, string][] } {
-    const nodes = [...useVault.getState().notes.keys()];
+    const { notes, files } = useVault.getState();
+    const nodes = [...notes.keys()];
+    for (const f of files) {
+      if (isHtmlPath(f.path) && !isHiddenPath(f.path)) nodes.push(f.path);
+    }
     const edges: [string, string][] = [];
     for (const [from, targets] of this.outgoing) {
       for (const to of targets) edges.push([from, to]);

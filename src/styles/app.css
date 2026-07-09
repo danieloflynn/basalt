@@ -791,6 +791,17 @@
   height: 40px;
 }
 
+/* Sandboxed HTML artifact viewer: the frame fills the screen below the top bar.
+   White fallback so an artifact that sets no colors reads as a normal page,
+   not black-on-transparent over the basalt background. */
+.artifact-frame {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  border: none;
+  background: #fff;
+}
+
 .workspace-top__status {
   font-size: var(--text-sm);
   color: var(--text-faint);

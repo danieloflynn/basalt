@@ -53,6 +53,15 @@ describe('nav history', () => {
     expect(nav().sidebarOpen).toBe(false);
   });
 
+  it('artifact screens live in history and label tabs without the extension', () => {
+    nav().push({ name: 'artifact', path: 'Artifacts/Sync Pulse.html' });
+    expect(currentScreen(nav())).toEqual({ name: 'artifact', path: 'Artifacts/Sync Pulse.html' });
+    expect(tabLabel(nav().tabs[0])).toBe('Sync Pulse');
+
+    nav().renamePath('Artifacts/Sync Pulse.html', 'Artifacts/Pulse.html');
+    expect(currentScreen(nav())).toEqual({ name: 'artifact', path: 'Artifacts/Pulse.html' });
+  });
+
   it('tabs are independent and closable', () => {
     nav().push({ name: 'note', path: 'a.md' });
     nav().newTab({ name: 'note', path: 'b.md' });

@@ -82,3 +82,16 @@ sync indicator (`.sync-columns`) that glows ember while syncing.
   `discard`) assumes markdown files are in it. Membership checks go through
   `search.has()`, never the notes map (it's rebuilt from file listings and
   lies about index membership).
+- HTML artifacts: `.html`/`.htm` vault files are first-class, rendered in a
+  srcdoc iframe (`ArtifactFrame`) sandboxed WITHOUT `allow-same-origin` —
+  artifact scripts run but can never reach the app, the Capacitor bridge, or
+  vault storage. Keep it that way. The ONLY channel out is the injected click
+  bridge (`injectArtifactBridge` in `src/lib/artifactLinks.ts`): anchor taps
+  postMessage their href to the app, which treats it purely as a link target
+  — vault links open in-app, http(s) opens the system browser. Tree rows,
+  wikilinks (`[[page.html]]`) and markdown links open the viewer;
+  `![[page.html]]` embeds inline (the `data-media` path in `remarkObsidian`).
+  Artifacts stay out of the notes map / search index — they're files, not
+  notes — but they ARE graph nodes: `<a href>` targets and `[[wikilinks]]`
+  in the HTML source become edges, artifact nodes render in the link color,
+  and backlinks list artifact sources.

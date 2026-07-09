@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { HeadingInfo } from '@/lib/outline';
 import { parseFrontmatter, serializeFrontmatter } from '@/lib/frontmatter';
-import { basename, dirname, joinPath } from '@/lib/paths';
+import { basename, dirname, isHtmlPath, joinPath } from '@/lib/paths';
 import { vaultService, useVault, type Backlink } from '@/services';
 import { openNote, useNav } from '@/state/nav';
 import { scrollToHeading } from '@/ui/markdown/Markdown';
@@ -138,7 +138,9 @@ function BacklinksPanel({ backlinks, onClose }: { backlinks: Backlink[]; onClose
           style={{ alignItems: 'flex-start', flexDirection: 'column', gap: 2 }}
           onClick={() => {
             onClose();
-            openNote(b.path);
+            // A backlink source can be an HTML artifact — open it in the viewer.
+            if (isHtmlPath(b.path)) useNav.getState().push({ name: 'artifact', path: b.path });
+            else openNote(b.path);
           }}
         >
           <span style={{ fontWeight: 600 }}>{b.title}</span>
