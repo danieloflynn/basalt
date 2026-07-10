@@ -375,6 +375,41 @@ details.callout[open] > summary::after {
   border-left-color: var(--unresolved);
 }
 
+/* ---------- HTML artifact embeds (![[page.html]]) ---------- */
+
+.embed--artifact {
+  padding: 4px 0 0;
+  overflow: hidden;
+}
+
+.embed__title--artifact {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 14px 8px;
+}
+
+.embed__open {
+  margin-left: auto;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: var(--link);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 10px;
+}
+
+.artifact-frame--embed {
+  display: block;
+  width: 100%;
+  height: 320px;
+  border: none;
+  border-top: 1px solid var(--border);
+  background: #fff;
+}
+
 /* ---------- Code syntax (highlight.js, token-mapped) ---------- */
 
 .hljs-comment,

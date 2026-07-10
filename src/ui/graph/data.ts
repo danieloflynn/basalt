@@ -4,7 +4,7 @@
  * mode) restricts to a note's neighbourhood.
  */
 import { parseFrontmatter } from '@/lib/frontmatter';
-import { isMarkdownPath } from '@/lib/paths';
+import { isHiddenPath, isHtmlPath, isMarkdownPath, noteTitle } from '@/lib/paths';
 import { stripCode } from '@/lib/tags';
 import { parseWikilinks } from '@/lib/wikilinks';
 import { vaultService } from '@/services';
@@ -50,8 +50,17 @@ export function gatherGraphInput(path?: string): GraphInput {
     mtimeMs: n.mtimeMs,
   }));
 
+  // HTML artifacts are first-class graph nodes (files, not notes — hence sourced
+  // from the file list, no tags). They carry a real mtime for the timelapse.
+  for (const f of useVault.getState().files) {
+    if (!isHtmlPath(f.path) || isHiddenPath(f.path)) continue;
+    allNotes.push({ path: f.path, title: noteTitle(f.path), tags: [], mtimeMs: f.mtimeMs, isArtifact: true });
+  }
+
   const allLinks: RawLink[] = [];
   for (const note of allNotes) {
+    // Artifact edges come from the vault's link index (below), not body parsing.
+    if (note.isArtifact) continue;
     const text = vaultService.noteContent(note.path);
     if (text === undefined) continue;
     const seen = new Set<string>();
@@ -69,17 +78,43 @@ export function gatherGraphInput(path?: string): GraphInput {
     }
   }
 
+  // Artifact outgoing edges: <a href>/[[wikilink]] targets in the HTML source,
+  // already resolved to graph nodes (notes + artifacts — no attachment/phantom
+  // targets) by the vault's link index. `resolved` is non-null, so these never
+  // become phantom nodes; the target label is unused.
+  for (const note of allNotes) {
+    if (!note.isArtifact) continue;
+    for (const resolved of vaultService.outgoingOf(note.path)) {
+      allLinks.push({
+        from: note.path,
+        target: resolved,
+        resolved,
+        resolvedIsMarkdown: isMarkdownPath(resolved),
+      });
+    }
+  }
+
   if (!path) return { notes: allNotes, links: allLinks };
 
-  // Local mode: keep the focused note plus its direct note-note neighbours.
+  // Local mode: keep the focused node plus its direct graph-node neighbours
+  // (notes and artifacts alike — membership in the graph-node set is the gate).
+  const graphPaths = new Set(allNotes.map((n) => n.path));
   const keep = new Set<string>([path]);
   for (const l of allLinks) {
-    if (!l.resolvedIsMarkdown || !l.resolved) continue;
+    if (!l.resolved || !graphPaths.has(l.resolved)) continue;
     if (l.from === path) keep.add(l.resolved);
     if (l.resolved === path) keep.add(l.from);
   }
   return {
     notes: allNotes.filter((n) => keep.has(n.path)),
-    links: allLinks.filter((l) => keep.has(l.from)),
+    // Keep links OUT of the focused neighbourhood so tags/attachments/phantoms
+    // still attach, but DROP links pointing at a graph node we aren't showing.
+    // Otherwise a second-degree artifact — whose node-node edge can't form (it's
+    // not kept) — would fall through to the attachment branch (`noteByPath`, the
+    // model's graph-node set, is only the kept nodes in local mode) and render as
+    // a stray "attachment". Links to real attachments/phantoms are untouched.
+    links: allLinks.filter(
+      (l) => keep.has(l.from) && !(l.resolved !== null && graphPaths.has(l.resolved) && !keep.has(l.resolved)),
+    ),
   };
 }

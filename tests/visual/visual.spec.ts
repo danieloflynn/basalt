@@ -301,6 +301,43 @@ test.describe('graph, history, settings', () => {
   });
 });
 
+test.describe('html artifacts', () => {
+  test('artifact viewer', async ({ page }) => {
+    await onboard(page);
+    await page.getByRole('button', { name: 'Open sidebar' }).click();
+    await page.getByRole('button', { name: 'Sync Pulse html', exact: true }).click();
+    const frame = page.frameLocator('.artifact-frame');
+    await frame.getByRole('button', { name: 'Pulse 0' }).waitFor();
+    // The bars are appended by the artifact's script — wait for all four so the
+    // screenshot never catches the sandbox mid-paint (Pulse 0 is static HTML and
+    // shows before the script runs).
+    await frame.locator('.col').nth(3).waitFor();
+    await settle(page);
+    await expect(page).toHaveScreenshot('31-artifact-viewer.png');
+  });
+
+  test('inline embed in reading view', async ({ page }) => {
+    await onboard(page);
+    await openShowcase(page);
+    // Showcase renders lazy KaTeX + async Mermaid ABOVE the embed; if either is
+    // still laying out when we scroll, the embed's offset shifts and the whole
+    // frame moves under the capture. Wait for both so the layout above is fixed.
+    await page.locator('.katex').first().waitFor({ timeout: 20_000 });
+    await page.locator('.mermaid-figure svg').first().waitFor({ timeout: 20_000 });
+    const embed = page.locator('.embed--artifact');
+    const frame = page.frameLocator('.artifact-frame--embed');
+    await frame.getByRole('button', { name: 'Pulse 0' }).waitFor();
+    // Wait for all four scripted bars so the screenshot never lands mid-paint
+    // (Pulse 0 is static HTML and appears before the sandbox script runs).
+    await frame.locator('.col').nth(3).waitFor();
+    // Deterministic scroll (layout above is now settled) — scrollIntoViewIfNeeded
+    // lands at a variable offset depending on render timing.
+    await embed.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    await settle(page);
+    await expect(page).toHaveScreenshot('32-artifact-embed.png');
+  });
+});
+
 test.describe('light mode', () => {
   test.use({ colorScheme: 'light' });
 

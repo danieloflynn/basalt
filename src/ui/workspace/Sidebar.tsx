@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import type { TreeFolder, TreeNode } from '@/lib/tree';
-import { dirname, isMarkdownPath, noteTitle } from '@/lib/paths';
+import { dirname, isHtmlPath, isMarkdownPath, noteTitle } from '@/lib/paths';
 import {
   useSettings,
   useVault,
@@ -385,7 +385,10 @@ function TreeLevel({
   const files = useVault((s) => s.files);
   const nav = useNav();
   const screen = nav.tabs[nav.active].history[nav.tabs[nav.active].index];
-  const activePath = screen.name === 'note' || screen.name === 'edit' ? screen.path : null;
+  const activePath =
+    screen.name === 'note' || screen.name === 'edit' || screen.name === 'artifact'
+      ? screen.path
+      : null;
 
   const children = useMemo(() => {
     if (sortOrder === 'name') return folder.children;
@@ -599,7 +602,8 @@ function FileRow({
     (x, y, id) => onArm(node, x, y, id),
     () => onLongPress(node),
   );
-  const isMd = node.path.toLowerCase().endsWith('.md');
+  const isMd = isMarkdownPath(node.path);
+  const isArtifact = isHtmlPath(node.path);
   const classes = ['tree-row'];
   if (active) classes.push('tree-row--active');
   if (drag?.path === node.path) classes.push('tree-row--drag-source');
@@ -611,12 +615,13 @@ function FileRow({
       data-drop-folder={dirname(node.path)}
       {...handlers}
       onClick={() => {
-        if (fired.current || !isMd) return;
-        useNav.getState().push({ name: 'note', path: node.path });
+        if (fired.current) return;
+        if (isMd) useNav.getState().push({ name: 'note', path: node.path });
+        else if (isArtifact) useNav.getState().push({ name: 'artifact', path: node.path });
       }}
     >
       <span className="tree-row__name">
-        {isMd ? noteTitle(node.path) : node.name}
+        {isMd || isArtifact ? noteTitle(node.path) : node.name}
         {!isMd && <span className="tree-row__ext"> {node.name.split('.').pop()}</span>}
       </span>
     </button>

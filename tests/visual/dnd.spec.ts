@@ -104,20 +104,28 @@ test('long-press + release still opens the file actions sheet', async ({ page })
 test('dropping outside the tree cancels the move', async ({ page }) => {
   await onboard(page);
   await openTree(page);
-  const welcome = await center(page, 'Welcome');
+  // Drag a NESTED file (Basalt lives in Projects). A real cancel leaves it
+  // nested; only an accidental move-to-root would change its indent — so this
+  // distinguishes cancellation from a root-drop (dragging a root file couldn't).
+  const basalt = await center(page, 'Basalt');
+  // The view-switcher pill floats below the tree scroller (outside
+  // .sidebar__content) — a genuine non-target. Compute its position rather than
+  // hardcoding a Y, which collides with rows as the vault grows.
+  const pill = await center(page, 'Files');
 
-  const f = await touchDown(page, welcome.x, welcome.y);
-  await page.waitForTimeout(600);
-  // The view-switcher pill floats over the bottom of the drawer — not a target.
-  await touchTo(page, f, welcome.x, 700);
+  const f = await touchDown(page, basalt.x, basalt.y);
+  await page.waitForTimeout(600); // long-press arms the drag…
+  await expect(page.locator('.tree-drag-ghost')).toBeVisible(); // …ghost lifted
+  await touchTo(page, f, pill.x, pill.y);
   await touchEnd(f);
 
   await expect(page.locator('.tree-drag-ghost')).toHaveCount(0);
   await expect(page.locator('.sheet')).toHaveCount(0);
-  // Welcome is still a root-level row (root indent, 28px).
-  await expect(page.getByRole('button', { name: 'Welcome', exact: true })).toHaveCSS(
+  // Basalt stays nested inside Projects (depth-1 indent, 46px) — a cancelled
+  // drop, NOT a move to root (which would be 28px).
+  await expect(page.getByRole('button', { name: 'Basalt', exact: true })).toHaveCSS(
     'padding-left',
-    '28px',
+    '46px',
   );
 });
 

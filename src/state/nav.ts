@@ -4,6 +4,7 @@ export type Screen =
   | { name: 'empty' }
   | { name: 'note'; path: string; heading?: string }
   | { name: 'edit'; path: string; heading?: string }
+  | { name: 'artifact'; path: string }
   | { name: 'settings' }
   | { name: 'history'; path?: string }
   | { name: 'noteVersion'; path: string; oid: string; when: number }
@@ -243,7 +244,8 @@ export function tabLabel(tab: Tab): string {
     case 'note':
     case 'edit':
     case 'noteVersion':
-      return top.path.split('/').pop()?.replace(/\.md$/i, '') ?? top.path;
+    case 'artifact':
+      return top.path.split('/').pop()?.replace(/\.(md|html?)$/i, '') ?? top.path;
     case 'settings':
       return 'Settings';
     case 'history':

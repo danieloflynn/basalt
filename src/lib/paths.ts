@@ -65,6 +65,12 @@ export function isPdfPath(p: string): boolean {
   return extname(p) === '.pdf';
 }
 
+/** HTML artifacts: self-contained .html/.htm files viewed in a sandboxed frame. */
+export function isHtmlPath(p: string): boolean {
+  const ext = extname(p);
+  return ext === '.html' || ext === '.htm';
+}
+
 /** Display title of a note: its basename without the .md extension. */
 export function noteTitle(p: string): string {
   return stripExt(basename(p));

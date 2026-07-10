@@ -281,7 +281,9 @@ test('tapping a linked mention navigates there and closes the drawer', async ({ 
   await onboard(page);
   await openWelcome(page);
   await swipe(page, { x: 370, y: 210 }, { x: 80, y: 215 });
-  await page.locator('.sidebar-right').getByText('Reading List').click();
+  // exact: the Sync Pulse artifact backlinks Welcome too, and its excerpt text
+  // contains "Reading List" — target the backlink title row, not an excerpt.
+  await page.locator('.sidebar-right').getByText('Reading List', { exact: true }).click();
   await expect(page.locator('.sidebar-right[data-open]')).toHaveCount(0);
   await expect(page.locator('.inline-title')).toHaveValue('Reading List');
 });

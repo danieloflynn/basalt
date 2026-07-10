@@ -112,6 +112,77 @@ describe('buildGraphModel filters', () => {
   });
 });
 
+describe('artifacts as graph nodes', () => {
+  // N (note) → art.html (artifact) and N → M (note); art.html → M (note);
+  // art.html → deck.html (artifact). Artifact links resolve to non-markdown
+  // graph nodes, so the model must gate edges on membership, not markdown-ness.
+  const aNotes: RawNote[] = [
+    { path: 'N.md', title: 'N', tags: [], mtimeMs: 100 },
+    { path: 'M.md', title: 'M', tags: [], mtimeMs: 200 },
+    { path: 'art.html', title: 'art', tags: [], mtimeMs: 150, isArtifact: true },
+    { path: 'deck.html', title: 'deck', tags: [], mtimeMs: 300, isArtifact: true },
+  ];
+  const aLinks: RawLink[] = [
+    { from: 'N.md', target: 'art.html', resolved: 'art.html', resolvedIsMarkdown: false },
+    { from: 'N.md', target: 'M', resolved: 'M.md', resolvedIsMarkdown: true },
+    { from: 'art.html', target: 'M', resolved: 'M.md', resolvedIsMarkdown: true },
+    { from: 'art.html', target: 'deck.html', resolved: 'deck.html', resolvedIsMarkdown: false },
+  ];
+
+  it('renders artifacts as their own node kind', () => {
+    const m = buildGraphModel(aNotes, aLinks, DEFAULT_GRAPH_CONFIG);
+    expect(m.nodes.find((n) => n.id === 'art.html')?.kind).toBe('artifact');
+    expect(m.nodes.find((n) => n.id === 'deck.html')?.kind).toBe('artifact');
+    expect(m.nodes.find((n) => n.id === 'N.md')?.kind).toBe('note');
+  });
+
+  it('forms note→artifact, artifact→note and artifact→artifact edges', () => {
+    const m = buildGraphModel(aNotes, aLinks, DEFAULT_GRAPH_CONFIG);
+    expect(m.edges).toContainEqual({ source: 'N.md', target: 'art.html' });
+    expect(m.edges).toContainEqual({ source: 'art.html', target: 'M.md' });
+    expect(m.edges).toContainEqual({ source: 'art.html', target: 'deck.html' });
+  });
+
+  it('never double-counts an artifact as an attachment', () => {
+    const withImg: RawLink[] = [
+      ...aLinks,
+      { from: 'N.md', target: 'pic.png', resolved: 'pic.png', resolvedIsMarkdown: false },
+    ];
+    const m = buildGraphModel(aNotes, withImg, cfg({ attachments: true }));
+    const attachments = m.nodes.filter((n) => n.kind === 'attachment').map((n) => n.id);
+    expect(attachments).toEqual(['pic.png']); // only the real attachment, not the .html files
+  });
+
+  it('includes artifacts in the timelapse reveal order (by mtime)', () => {
+    const m = buildGraphModel(aNotes, aLinks, DEFAULT_GRAPH_CONFIG);
+    expect(timelapseOrder(m.nodes)).toEqual(['N.md', 'art.html', 'M.md', 'deck.html']);
+  });
+});
+
+describe('edge dedup keys', () => {
+  // Vault paths legally contain spaces (and, via titles like "A.md B", an inner
+  // ".md"): `sanitizeNoteTitle` only strips a TRAILING .md. A space-joined dedup
+  // key would collapse two distinct edges into one; the newline-joined key must
+  // not. Both pairs below share the space-join "A.md B.md C.md".
+  const collideNotes: RawNote[] = [
+    { path: 'A.md', title: 'A', tags: [], mtimeMs: 1 },
+    { path: 'A.md B.md', title: 'A.md B', tags: [], mtimeMs: 2 },
+    { path: 'B.md C.md', title: 'B.md C', tags: [], mtimeMs: 3 },
+    { path: 'C.md', title: 'C', tags: [], mtimeMs: 4 },
+  ];
+  const collideLinks: RawLink[] = [
+    { from: 'A.md', target: 'B.md C', resolved: 'B.md C.md', resolvedIsMarkdown: true },
+    { from: 'A.md B.md', target: 'C', resolved: 'C.md', resolvedIsMarkdown: true },
+  ];
+
+  it('keeps both edges whose space-joined keys would collide', () => {
+    const m = buildGraphModel(collideNotes, collideLinks, DEFAULT_GRAPH_CONFIG);
+    expect(m.edges).toContainEqual({ source: 'A.md', target: 'B.md C.md' });
+    expect(m.edges).toContainEqual({ source: 'A.md B.md', target: 'C.md' });
+    expect(m.edges).toHaveLength(2);
+  });
+});
+
 describe('timelapse ordering', () => {
   it('orders notes oldest-first', () => {
     const m = buildGraphModel(notes, links, DEFAULT_GRAPH_CONFIG);

@@ -1,6 +1,13 @@
 import { useState } from 'react';
 import { flushActiveEditor } from '@/lib/editorFlush';
-import { dirname, noteTitle } from '@/lib/paths';
+import {
+  dirname,
+  extname,
+  isMarkdownPath,
+  joinPath,
+  noteTitle,
+  sanitizeNoteTitle,
+} from '@/lib/paths';
 import type { TreeNode } from '@/lib/tree';
 import { vaultService } from '@/services';
 import { useNav } from '@/state/nav';
@@ -11,12 +18,14 @@ import { Dialog } from './Dialog';
 export function FileActionsSheet({ node, onClose }: { node: TreeNode; onClose: () => void }) {
   const [mode, setMode] = useState<'menu' | 'rename' | 'delete'>('menu');
   const isFolder = node.kind === 'folder';
+  const isNote = !isFolder && isMarkdownPath(node.path);
+  const kind = isFolder ? 'folder' : isNote ? 'note' : 'file';
   const displayName = isFolder ? node.name : noteTitle(node.path);
 
   if (mode === 'rename') {
     return (
       <Dialog
-        title={isFolder ? 'Rename folder' : 'Rename note'}
+        title={`Rename ${kind}`}
         initialValue={displayName}
         confirmLabel="Rename"
         onCancel={onClose}
@@ -31,10 +40,19 @@ export function FileActionsSheet({ node, onClose }: { node: TreeNode; onClose: (
             // rewrite, bookmark migration); repoint history per moved file.
             const moves = await vaultService.renameFolder(node.path, clean);
             for (const { from, to } of moves) nav.renamePath(from, to);
-          } else {
+          } else if (isNote) {
             // Safe note rename (sanitize/dedupe/link-rewrite/bookmark migration).
             const finalPath = await vaultService.renameByTitle(node.path, clean);
             if (finalPath !== node.path) nav.renamePath(node.path, finalPath);
+          } else {
+            // Other files (e.g. .html artifacts): renameByTitle is .md-only, so
+            // rename in place keeping the extension. Guarded renameFile throws
+            // rather than overwrite an existing file (never silently clobbers).
+            const to = joinPath(dirname(node.path), sanitizeNoteTitle(clean) + extname(node.path));
+            if (to !== node.path) {
+              await vaultService.renameFile(node.path, to);
+              nav.renamePath(node.path, to);
+            }
           }
         }}
       />
@@ -44,7 +62,7 @@ export function FileActionsSheet({ node, onClose }: { node: TreeNode; onClose: (
   if (mode === 'delete') {
     return (
       <Dialog
-        title={`Delete ${isFolder ? 'folder' : 'note'}?`}
+        title={`Delete ${kind}?`}
         message={
           isFolder
             ? `"${displayName}" and everything inside it will be deleted from the vault. Git history still has it until history is rewritten.`
@@ -89,7 +107,8 @@ export function FileActionsSheet({ node, onClose }: { node: TreeNode; onClose: (
           </span>
           Rename
         </button>
-        {!isFolder && (
+        {/* Duplicate goes through createNote, which is markdown-only. */}
+        {isNote && (
           <button
             className="sheet__item"
             onClick={async () => {

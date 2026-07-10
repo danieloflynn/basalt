@@ -17,6 +17,7 @@ tree, synced with GitHub. No lock-in, ever.
 
 - Open the [[Projects/Basalt|Basalt project note]]
 - A daily note: [[2026-07-02]]
+- An HTML artifact: [[Sync Pulse.html|Sync Pulse]]
 - Check tasks below
 
 ## Tasks
@@ -126,6 +127,12 @@ graph LR
 > This callout starts collapsed — tap to open.
 
 A link to a note that doesn't exist yet renders muted: [[Future Idea]].
+
+## HTML artifacts
+
+An .html file in the vault renders sandboxed, scripts and all:
+
+![[Sync Pulse.html]]
 `,
   'templates/Meeting.md': `# {{title}}
 
@@ -137,6 +144,53 @@ Date: {{date}} {{time}}
 
 ## Notes
 
+`,
+  'Artifacts/Sync Pulse.html': `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sync Pulse</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; padding: 24px; font-family: system-ui, sans-serif; background: #131215; color: #e8e6e3; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p { margin: 0 0 20px; font-size: 13px; color: #9b978f; }
+  .cols { display: flex; gap: 10px; align-items: flex-end; height: 120px; margin-bottom: 20px; }
+  .col { flex: 1; border-radius: 6px 6px 2px 2px; background: linear-gradient(180deg, #ff6a2b, #b23a10); transition: height 0.3s ease; }
+  button { border: none; border-radius: 999px; padding: 10px 18px; font-size: 14px; font-weight: 600; background: #ff6a2b; color: #131215; }
+  #count { font-variant-numeric: tabular-nums; }
+  .foot { margin-top: 24px; font-size: 12px; color: #6f6b64; }
+  .foot a { color: #8fbfa5; }
+</style>
+</head>
+<body>
+  <h1>Sync Pulse</h1>
+  <p>A self-contained HTML artifact living in the vault, rendered in a sandbox.</p>
+  <div class="cols" id="cols"></div>
+  <button id="pulse">Pulse <span id="count">0</span></button>
+  <!-- Vault links (they show up in the graph): <a href="Welcome.md"> and [[Reading List]] -->
+  <p class="foot">Part of the <a href="Welcome.md">Welcome</a> tour.</p>
+  <script>
+    var heights = [42, 78, 56, 96];
+    var cols = document.getElementById('cols');
+    heights.forEach(function (h) {
+      var d = document.createElement('div');
+      d.className = 'col';
+      d.style.height = h + '%';
+      cols.appendChild(d);
+    });
+    var n = 0;
+    document.getElementById('pulse').addEventListener('click', function () {
+      n += 1;
+      document.getElementById('count').textContent = String(n);
+      Array.prototype.forEach.call(cols.children, function (c, i) {
+        c.style.height = (30 + ((n * 17 + i * 23) % 70)) + '%';
+      });
+    });
+  </script>
+</body>
+</html>
 `,
   '.obsidian/daily-notes.json': `{"folder": "Daily", "format": "YYYY-MM-DD"}`,
   'Daily/2026-07-01.md': `# 2026-07-01

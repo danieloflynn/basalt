@@ -1,5 +1,5 @@
 import { useMemo, type ReactNode } from 'react';
-import { basename, noteTitle, stripExt } from '@/lib/paths';
+import { basename, isHtmlPath, noteTitle, stripExt } from '@/lib/paths';
 import { stripInlineMarkdown } from '@/lib/plaintext';
 import { parseWikilinks } from '@/lib/wikilinks';
 import { useVault, vaultService } from '@/services';
@@ -83,7 +83,14 @@ export function RightSidebar({ open }: { open: boolean }) {
                     height: 'auto',
                     minHeight: 44,
                   }}
-                  onClick={() => openNote(b.path)}
+                  onClick={() => {
+                    // A backlink source can be an HTML artifact — open it in the
+                    // sandboxed viewer, never the markdown reader/editor (which
+                    // would render raw HTML and, in editing mode, let an autosave
+                    // add the artifact to the notes map / search index).
+                    if (isHtmlPath(b.path)) useNav.getState().push({ name: 'artifact', path: b.path });
+                    else openNote(b.path);
+                  }}
                 >
                   <span className="tree-row__name" style={{ fontWeight: 550 }}>
                     {b.title}

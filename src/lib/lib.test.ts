@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import { extractArtifactLinks, injectArtifactBridge } from './artifactLinks';
 import { diffLines } from './diff';
 import { parseFrontmatter, serializeFrontmatter } from './frontmatter';
 import { extractBlock, extractOutline, removeComments, slugifyHeading } from './outline';
 import { extractTags } from './tags';
 import { buildTree, walkFiles } from './tree';
-import { dirname, extname, isHiddenPath, joinPath, normalizePath, noteTitle } from './paths';
+import { dirname, extname, isHiddenPath, isHtmlPath, joinPath, normalizePath, noteTitle } from './paths';
 import { LinkResolver, parseWikilinks, wikilinkDisplayText } from './wikilinks';
 import { stripInlineMarkdown } from './plaintext';
 import { claimAxis, drawerProgress, FLING_VELOCITY, pullTriggered, settleOpen, velocityX } from './gesture';
@@ -22,6 +23,14 @@ describe('paths', () => {
     expect(extname('a/B.PNG')).toBe('.png');
     expect(extname('.gitignore')).toBe('');
     expect(noteTitle('notes/My Note.md')).toBe('My Note');
+  });
+
+  it('classifies HTML artifact paths', () => {
+    expect(isHtmlPath('Artifacts/Sync Pulse.html')).toBe(true);
+    expect(isHtmlPath('page.HTM')).toBe(true);
+    expect(isHtmlPath('note.md')).toBe(false);
+    expect(isHtmlPath('page.html.md')).toBe(false);
+    expect(noteTitle('Artifacts/Sync Pulse.html')).toBe('Sync Pulse');
   });
 
   it('detects hidden paths at any depth', () => {
@@ -102,12 +111,55 @@ describe('LinkResolver', () => {
     expect(resolver.resolve('Nope', 'Inbox.md')).toBeNull();
   });
 
+  it('resolves HTML artifacts by bare name with extension', () => {
+    const r = new LinkResolver(['Inbox.md', 'Artifacts/Sync Pulse.html']);
+    expect(r.resolve('Sync Pulse.html', 'Inbox.md')).toBe('Artifacts/Sync Pulse.html');
+    expect(r.resolve('Artifacts/Sync Pulse.html', 'Inbox.md')).toBe('Artifacts/Sync Pulse.html');
+    // Extensionless bare names stay markdown-only (Obsidian behavior).
+    expect(r.resolve('Sync Pulse', 'Inbox.md')).toBeNull();
+  });
+
   it('tracks additions and removals', () => {
     const r = new LinkResolver(['A.md']);
     r.add('B.md');
     expect(r.resolve('B', 'A.md')).toBe('B.md');
     r.remove('B.md');
     expect(r.resolve('B', 'A.md')).toBeNull();
+  });
+});
+
+describe('extractArtifactLinks', () => {
+  it('extracts vault-relative hrefs, skipping external, mailto and fragment links', () => {
+    const html = `
+      <a href="Welcome.md">Welcome</a>
+      <a class="x" href='notes/Deep%20Note.md#Heading'>deep</a>
+      <a href="https://example.com/page.md">out</a>
+      <a href="mailto:x@y.z">mail</a>
+      <a href="#section">frag</a>
+    `;
+    expect(extractArtifactLinks(html)).toEqual(['Welcome.md', 'notes/Deep Note.md']);
+  });
+
+  it('finds [[wikilinks]] anywhere in the source and dedupes targets', () => {
+    const html =
+      '<!-- [[Reading List]] --> <a href="Welcome.md">w</a> <a href="Welcome.md">again</a>';
+    expect(extractArtifactLinks(html)).toEqual(['Welcome.md', 'Reading List']);
+  });
+
+  it('returns nothing for link-free documents', () => {
+    expect(extractArtifactLinks('<h1>Hi</h1><p>plain</p>')).toEqual([]);
+  });
+
+  it('injects the click bridge into <head>, or prepends without one', () => {
+    const withHead = injectArtifactBridge('<html><head><title>x</title></head><body/></html>');
+    expect(withHead.indexOf('basalt:link')).toBeGreaterThan(withHead.indexOf('<head>'));
+    expect(withHead.indexOf('basalt:link')).toBeLessThan(withHead.indexOf('<title>'));
+
+    const bare = injectArtifactBridge('<h1>Hi</h1>');
+    expect(bare.startsWith('<script>')).toBe(true);
+    expect(bare.endsWith('<h1>Hi</h1>')).toBe(true);
+    // The injected script must terminate itself properly.
+    expect(bare).toContain('</script>');
   });
 });
 
