@@ -198,3 +198,8 @@ export function listCommands(): AppCommand[] {
     },
   ];
 }
+
+/** Look up a command by id and run it — the ribbon's one-liner invocation. */
+export function runCommand(id: string): void {
+  void listCommands().find((c) => c.id === id)?.run();
+}

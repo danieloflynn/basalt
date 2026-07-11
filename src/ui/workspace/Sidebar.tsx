@@ -26,7 +26,8 @@ import { SyncStatus } from '@/ui/components/SyncStatus';
 import { defaultNewNoteFolder } from '@/ui/templates';
 import { VaultMenu } from './VaultMenu';
 
-const VIEWS: {
+/** Shared with the desktop titlebar view-switcher cluster — same icons/order. */
+export const VIEWS: {
   view: SidebarView;
   label: string;
   icon: (p: { size?: number }) => React.ReactNode;

@@ -18,7 +18,7 @@ export type ViewMode = 'reading' | 'editing';
 /** Workspace overlays (bottom-pill popups); global so gestures can open them. */
 export type Overlay = 'none' | 'quickopen' | 'tabs' | 'palette';
 
-interface Tab {
+export interface Tab {
   /** Visited screens; index points at the current one (enables forward). */
   history: Screen[];
   index: number;

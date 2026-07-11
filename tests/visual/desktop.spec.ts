@@ -23,6 +23,11 @@ test('empty workspace docks both sidebars with the tab strip', async ({ page }) 
   await expect(page.locator('.shell[data-desktop][data-left][data-right]')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Welcome', exact: true })).toBeVisible();
   await expect(page.locator('.sidebar-right')).toContainText('Backlinks');
+  // Ribbon: always-visible left icon strip with one button per global command.
+  await expect(page.locator('.ribbon')).toBeVisible();
+  await expect(page.locator('.ribbon__item')).toHaveCount(5);
+  // Titlebar view-switcher cluster only shows while the sidebar is docked open.
+  await expect(page.locator('.titlebar-switcher')).toBeVisible();
   await settle(page);
   await expect(page).toHaveScreenshot('desktop-01-empty.png');
 });

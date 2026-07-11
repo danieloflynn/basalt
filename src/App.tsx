@@ -26,6 +26,7 @@ import { SidebarToggle } from '@/ui/workspace/chrome';
 import { DesktopChrome } from '@/ui/workspace/DesktopChrome';
 import { DrawerGestures } from '@/ui/workspace/DrawerGestures';
 import { OverlayHost } from '@/ui/workspace/OverlayHost';
+import { Ribbon } from '@/ui/workspace/Ribbon';
 import { RightSidebar } from '@/ui/workspace/RightSidebar';
 import { Sidebar } from '@/ui/workspace/Sidebar';
 import { useIsDesktop } from '@/ui/hooks/useIsDesktop';
@@ -172,6 +173,7 @@ export function App() {
       data-left={isDesktop && sidebarOpen ? '' : undefined}
       data-right={isDesktop && rightSidebarOpen ? '' : undefined}
     >
+      {isDesktop && <Ribbon />}
       {isDesktop && <DesktopChrome />}
       <WorkspaceScreen screen={screen} />
       <div className="banners-layer">
