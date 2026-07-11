@@ -15,7 +15,7 @@
     "electron:bundle": "node electron/build.mjs",
     "electron:dev": "node electron/build.mjs && BASALT_DEV_URL=http://localhost:5173 electron .",
     "electron:build": "npm run build && npm run electron:typecheck && npm run electron:bundle",
-    "electron:pack": "npm run electron:build && electron-builder --mac --arm64"
+    "electron:pack": "npm run electron:build && electron-builder --mac --x64"
   },
   "keywords": [],
   "author": "",

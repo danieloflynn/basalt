@@ -38,7 +38,9 @@ committing straight to `main`, and still follow the repo's commit conventions
 - `npm run electron:dev` — bundle main/preload, then launch Electron against the
   running vite dev server (start `npm run dev` first). `electron:build` =
   renderer build + `tsc -p electron` + esbuild bundle; `electron:pack` = that,
-  then an unsigned arm64 `.dmg` in `release/`. Electron main/preload are
+  then an unsigned **x64** `.dmg` in `release/` (Daniel's Mac is Intel — a
+  Core i5; an arm64 build gives "not supported on this Mac". Switch to `--arm64`
+  or `--universal` only if the target machine changes). Electron main/preload are
   typechecked by `electron/tsconfig.json` (separate from the renderer's `tsc`).
 - Android build: `cd android && JAVA_HOME=$HOME/.local/java/jdk-21.0.11+10/Contents/Home ./gradlew assembleDebug`
   (JDK 21 required; system JDK 26 is too new for AGP. SDK path in `android/local.properties`.)
@@ -116,8 +118,9 @@ components.
   parsed as ESM and break `require`; `.cjs` also sidesteps Electron's ESM-preload
   restrictions. `main` field points at `electron-dist/main.cjs`; the preload path is
   `preload.cjs`. `app://bundle/index.html` serves `dist/` (vite `base` stays `/`, so
-  absolute `/assets` paths resolve). Build output (`electron-dist/`, `release/`) is
-  gitignored. **App icon:** source of truth is `build/icon.svg` (the four
+  absolute `/assets` paths resolve). `npm run electron:pack` builds an unsigned
+  **x64** `.dmg` (Daniel's Mac is Intel). Build output (`electron-dist/`,
+  `release/`) is gitignored. **App icon:** source of truth is `build/icon.svg` (the four
   molten-capped basalt columns — the sync-indicator signature, basalt-black +
   ember); regenerate `build/icon.icns` with
   `rsvg-convert` into an `.iconset` then `iconutil -c icns` (both committed;
