@@ -381,3 +381,23 @@ export const IconHash = (p: P) => (
     <path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18" />
   </I>
 );
+
+// ---- Desktop file-explorer header icons (WP8) ----
+
+export const IconSort = (p: P) => (
+  // Up/down arrow pair — sort-order trigger (Obsidian file-explorer parity).
+  <I {...p}>
+    <path d="M7 4v16" />
+    <path d="m3 16 4 4 4-4" />
+    <path d="M17 20V4" />
+    <path d="m21 8-4-4-4 4" />
+  </I>
+);
+
+export const IconChevronsUp = (p: P) => (
+  // Two stacked chevrons pointing up — collapse-all trigger.
+  <I {...p}>
+    <path d="m6 15 6-6 6 6" />
+    <path d="m6 20 6-6 6 6" />
+  </I>
+);

@@ -9,14 +9,19 @@ import {
   type SearchHit,
 } from '@/services';
 import { useNav, type SidebarView } from '@/state/nav';
+import { useAnchoredMenu, type AnchorPoint } from '@/ui/hooks/useAnchoredMenu';
 import {
+  IconCheck,
   IconChevronRight,
+  IconChevronsUp,
+  IconClock,
   IconFolder,
   IconFolderPlus,
   IconNote,
   IconNotePlus,
   IconSearch,
   IconSettings,
+  IconSort,
   IconStar,
   IconTag,
 } from '@/ui/icons';
@@ -163,6 +168,7 @@ function FilesPanel() {
   const tree = useVault((s) => s.tree);
   const sortOrder = useSettings((s) => s.settings.sortOrder);
   const { update } = useSettings();
+  const desktop = useNav((s) => s.desktop);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [actionTarget, setActionTarget] = useState<ActionTarget | null>(null);
   const openActions = (node: TreeNode, x?: number, y?: number) =>
@@ -173,6 +179,14 @@ function FilesPanel() {
   const ghostRef = useRef<HTMLDivElement>(null);
   // One tree drag at a time — guards against two fingers each arming a drag.
   const dragging = useRef(false);
+
+  // Desktop-only file-explorer header (WP8): sort-order popup + collapse-all.
+  const sortBtnRef = useRef<HTMLButtonElement>(null);
+  const [sortAnchor, setSortAnchor] = useState<AnchorPoint | null>(null);
+  const allFolderPaths = useMemo(() => collectFolderPaths(tree), [tree]);
+  const allCollapsed =
+    allFolderPaths.length > 0 && allFolderPaths.every((p) => collapsed.has(p));
+  const toggleCollapseAll = () => setCollapsed(allCollapsed ? new Set() : new Set(allFolderPaths));
 
   /**
    * A note row's long-press armed: from here the finger owns the touch.
@@ -315,23 +329,71 @@ function FilesPanel() {
       className="filetree"
       data-drop-root={(drag && drag.target === '' && drag.home !== '') || undefined}
     >
-      <div className="filetree__toolbar">
-        <button
-          className="iconbtn"
-          aria-label={sortOrder === 'name' ? 'Sort by modified time' : 'Sort by name'}
-          onClick={() => void update({ sortOrder: sortOrder === 'name' ? 'modified' : 'name' })}
-          style={{ fontSize: 'var(--text-xs)', width: 'auto', padding: '0 10px', gap: 4 }}
-        >
-          {sortOrder === 'name' ? 'A–Z' : 'Recent'}
-        </button>
-        <span style={{ flex: 1 }} />
-        <button className="iconbtn" aria-label="New folder" onClick={() => setCreatingFolder(true)}>
-          <IconFolderPlus size={20} />
-        </button>
-        <button className="iconbtn" aria-label="New note" onClick={() => void newNote()}>
-          <IconNotePlus size={20} />
-        </button>
-      </div>
+      {desktop ? (
+        // Obsidian-parity icon-only row: new note, new folder, sort, collapse
+        // all — left-aligned, no text pill (see mobile branch below).
+        <div className="filetree__toolbar filetree__toolbar--desktop">
+          <button className="iconbtn" aria-label="New note" onClick={() => void newNote()}>
+            <IconNotePlus size={16} />
+          </button>
+          <button className="iconbtn" aria-label="New folder" onClick={() => setCreatingFolder(true)}>
+            <IconFolderPlus size={16} />
+          </button>
+          <button
+            ref={sortBtnRef}
+            className="iconbtn"
+            aria-label="Change sort order"
+            aria-haspopup="menu"
+            aria-expanded={sortAnchor !== null}
+            onClick={() => {
+              // Unconditional open (like NoteScreen's "Note menu" trigger) —
+              // outside-click/Escape (via useAnchoredMenu) close it; a toggle
+              // here would race the outside-mousedown-close listener.
+              const r = sortBtnRef.current?.getBoundingClientRect();
+              if (r) setSortAnchor({ x: r.left, y: r.bottom + 6 });
+            }}
+          >
+            <IconSort size={16} />
+          </button>
+          <button
+            className="iconbtn"
+            aria-label={allCollapsed ? 'Expand all' : 'Collapse all'}
+            onClick={toggleCollapseAll}
+          >
+            <IconChevronsUp size={16} />
+          </button>
+        </div>
+      ) : (
+        <div className="filetree__toolbar">
+          <button
+            className="iconbtn"
+            aria-label={sortOrder === 'name' ? 'Sort by modified time' : 'Sort by name'}
+            onClick={() => void update({ sortOrder: sortOrder === 'name' ? 'modified' : 'name' })}
+            style={{ fontSize: 'var(--text-xs)', width: 'auto', padding: '0 10px', gap: 4 }}
+          >
+            {sortOrder === 'name' ? 'A–Z' : 'Recent'}
+          </button>
+          <span style={{ flex: 1 }} />
+          <button className="iconbtn" aria-label="New folder" onClick={() => setCreatingFolder(true)}>
+            <IconFolderPlus size={20} />
+          </button>
+          <button className="iconbtn" aria-label="New note" onClick={() => void newNote()}>
+            <IconNotePlus size={20} />
+          </button>
+        </div>
+      )}
+
+      {sortAnchor && (
+        <SortMenu
+          anchor={sortAnchor}
+          sortOrder={sortOrder}
+          onSelect={(order) => {
+            void update({ sortOrder: order });
+            setSortAnchor(null);
+          }}
+          onClose={() => setSortAnchor(null)}
+        />
+      )}
 
       <TreeLevel
         folder={tree}
@@ -381,6 +443,69 @@ function FilesPanel() {
 /** Ghost sits beside the finger, floated up so the fingertip doesn't hide it. */
 function ghostTransform(x: number, y: number): string {
   return `translate(${x + 12}px, ${y - 52}px)`;
+}
+
+/** Every folder path under `folder`, recursively (root's own '' path excluded). */
+function collectFolderPaths(folder: TreeFolder): string[] {
+  const out: string[] = [];
+  for (const child of folder.children) {
+    if (child.kind === 'folder') {
+      out.push(child.path);
+      out.push(...collectFolderPaths(child));
+    }
+  }
+  return out;
+}
+
+/**
+ * Desktop-only sort-order popup for the file-explorer header (WP8): reuses
+ * `useAnchoredMenu` + `.ctx-menu`/`.sheet__item` exactly like FileActionsSheet
+ * and NoteMenu's desktop context menus, anchored below-left of the trigger
+ * button. Lists the two `sortOrder` values from settings with a checkmark on
+ * the active one.
+ */
+function SortMenu({
+  anchor,
+  sortOrder,
+  onSelect,
+  onClose,
+}: {
+  anchor: AnchorPoint;
+  sortOrder: 'name' | 'modified';
+  onSelect: (order: 'name' | 'modified') => void;
+  onClose: () => void;
+}) {
+  const { ref, style } = useAnchoredMenu({ anchor, onClose });
+  return (
+    <div ref={ref} className="ctx-menu" role="menu" aria-label="Sort order" style={style}>
+      <button
+        className="sheet__item"
+        role="menuitemradio"
+        aria-checked={sortOrder === 'name'}
+        onClick={() => onSelect('name')}
+      >
+        <span className="row__icon">
+          <IconSort size={19} />
+        </span>
+        Name (A to Z)
+        <span style={{ flex: 1 }} />
+        {sortOrder === 'name' && <IconCheck size={14} />}
+      </button>
+      <button
+        className="sheet__item"
+        role="menuitemradio"
+        aria-checked={sortOrder === 'modified'}
+        onClick={() => onSelect('modified')}
+      >
+        <span className="row__icon">
+          <IconClock size={19} />
+        </span>
+        Recently modified
+        <span style={{ flex: 1 }} />
+        {sortOrder === 'modified' && <IconCheck size={14} />}
+      </button>
+    </div>
+  );
 }
 
 function TreeLevel({

@@ -2270,3 +2270,153 @@ html.is-electron .shell[data-desktop] {
   background: var(--surface);
   color: var(--danger);
 }
+
+/* ---------- WP8: desktop file-explorer header ---------- */
+
+/* Icon-only row (new note / new folder / sort / collapse-all), left-aligned,
+   replacing the mobile A–Z text pill — Obsidian file-explorer parity. Mobile
+   keeps `.filetree__toolbar` exactly as before; this modifier only applies
+   alongside it on desktop. */
+.shell[data-desktop] .filetree__toolbar--desktop {
+  gap: 2px;
+}
+
+.shell[data-desktop] .filetree__toolbar--desktop .iconbtn {
+  width: 28px;
+  height: 28px;
+}
+
+/* ---------- WP7: desktop linked-mentions panel ---------- */
+/* Everything below is scoped under [data-desktop] .sidebar-right so the
+   mobile backlinks drawer (same component, JSX-branched) is never touched. */
+
+/* Obsidian's backlinks pane has no big pane title — it opens straight with
+   the icon row + "Linked mentions". Hide the shared serif head on desktop
+   only (the mobile drawer keeps it). */
+.shell[data-desktop] .sidebar-right .rightbar__head {
+  display: none;
+}
+
+/* Header icon row — collapse/expand-all toggle. Only one control: this
+   feature set has no sort/order setting to back a second button. */
+.shell[data-desktop] .sidebar-right .rightbar__toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 4px 8px 0;
+}
+
+.shell[data-desktop] .sidebar-right .rightbar__toolbtn {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-sm);
+}
+
+.shell[data-desktop] .sidebar-right .rightbar__toolbtn:hover {
+  background: var(--surface);
+}
+
+.shell[data-desktop] .sidebar-right .rightbar__toolbtn[data-active] {
+  color: var(--text);
+  background: var(--surface-press);
+}
+
+/* "Linked mentions" title row: a small faint total replaces the old plain
+   section label, right-aligned like Obsidian Mac's backlinks pane. */
+.shell[data-desktop] .sidebar-right .rightbar__title-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 12px;
+}
+
+/* Sentence case, not the mobile drawer's uppercase-tracked label — matches
+   Obsidian Mac's "Linked mentions" row. */
+.shell[data-desktop] .sidebar-right .rightbar__title {
+  font-size: var(--text-sm);
+  font-weight: 550;
+  color: var(--text-muted);
+}
+
+.shell[data-desktop] .sidebar-right .rightbar__total {
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+/* One collapsible group per source note. */
+.shell[data-desktop] .sidebar-right .rightbar__group {
+  margin-bottom: 2px;
+}
+
+.shell[data-desktop] .sidebar-right .rightbar__group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 4px 12px;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: background var(--dur) var(--ease);
+}
+
+.shell[data-desktop] .sidebar-right .rightbar__group-head:hover {
+  background: var(--surface);
+}
+
+.shell[data-desktop] .sidebar-right .rightbar__group-chevron {
+  color: var(--text-faint);
+  flex-shrink: 0;
+  transition: transform var(--dur) var(--ease);
+}
+
+.shell[data-desktop] .sidebar-right .rightbar__group-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  font-family: inherit;
+  font-size: var(--text-md);
+  font-weight: 550;
+  color: var(--text);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.shell[data-desktop] .sidebar-right .rightbar__group-count {
+  font-size: var(--text-xs);
+  font-weight: 550;
+  color: var(--text-faint);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 8px;
+  flex-shrink: 0;
+}
+
+/* Each mention: its own rounded, bordered snippet card (Obsidian's excerpt
+   boxes), indented under the group title, clickable through to the source
+   note. Text styling comes from the existing .hit__excerpt rule so the
+   current note's highlighted mention (<mark>) keeps working unchanged. */
+.shell[data-desktop] .sidebar-right .rightbar__mention {
+  display: block;
+  margin: 2px 12px 8px 32px;
+  width: calc(100% - 44px);
+  padding: 8px 10px;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+.shell[data-desktop] .sidebar-right .rightbar__mention:hover {
+  background: var(--surface-raised);
+  border-color: var(--border-strong);
+}
+
+.shell[data-desktop] .sidebar-right .rightbar__mention .hit__excerpt {
+  margin-top: 0;
+}
