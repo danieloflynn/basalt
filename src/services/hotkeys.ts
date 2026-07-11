@@ -79,6 +79,67 @@ export function effectiveHotkeys(): Record<string, string[]> {
   return merged;
 }
 
+/**
+ * Add `chord` to command `id`'s binding list, returning a NEW overrides map
+ * (never mutates `overrides`). Starts from the EFFECTIVE list — the existing
+ * override if there is one, else `DEFAULT_HOTKEYS[id]` — so appending to a
+ * still-default command keeps its other default chords instead of starting
+ * from empty. No-op (value-wise) if `chord` is already bound, but always
+ * returns a fresh override entry for `id`.
+ */
+export function addBinding(
+  overrides: Record<string, string[]>,
+  id: string,
+  chord: string,
+): Record<string, string[]> {
+  const effective = overrides[id] ?? DEFAULT_HOTKEYS[id] ?? [];
+  const next = effective.includes(chord) ? effective : [...effective, chord];
+  return { ...overrides, [id]: next };
+}
+
+/**
+ * Remove `chord` from command `id`'s binding list, returning a NEW overrides
+ * map. Always writes an explicit override entry for `id` — even when the
+ * remainder happens to match what the default would already produce, and
+ * even when it empties out to `[]` (explicitly unbound) — because override
+ * semantics REPLACE the default list rather than merge with it; omitting the
+ * key here would let the (unrelated) default reassert itself later.
+ */
+export function removeBinding(
+  overrides: Record<string, string[]>,
+  id: string,
+  chord: string,
+): Record<string, string[]> {
+  const effective = overrides[id] ?? DEFAULT_HOTKEYS[id] ?? [];
+  const next = effective.filter((c) => c !== chord);
+  return { ...overrides, [id]: next };
+}
+
+/** Remove command `id`'s override entirely, returning a NEW map — the default applies again. */
+export function resetBinding(
+  overrides: Record<string, string[]>,
+  id: string,
+): Record<string, string[]> {
+  const { [id]: _dropped, ...rest } = overrides;
+  return rest;
+}
+
+/** True if command `id` has an explicit override entry (regardless of its value, incl. `[]`). */
+export function isOverridden(overrides: Record<string, string[]>, id: string): boolean {
+  return Object.prototype.hasOwnProperty.call(overrides, id);
+}
+
+// Suppresses installGlobalHotkeys' handler while a Hotkeys-settings row is
+// recording a new chord — without this, pressing e.g. Mod+P to RECORD a
+// binding would simultaneously fire the command it's currently bound to
+// (opening the command palette) since both listeners see the same keydown.
+let capturing = false;
+
+/** Arm/disarm hotkey-recording suppression (see `capturing` above). */
+export function setHotkeyCapture(on: boolean): void {
+  capturing = on;
+}
+
 const MAC_SYMBOLS: Record<string, string> = {
   Mod: '⌘',
   Ctrl: '⌃',
@@ -123,6 +184,8 @@ function isEditableTarget(target: EventTarget | null): boolean {
  */
 export function installGlobalHotkeys(): () => void {
   const handler = (e: KeyboardEvent) => {
+    if (capturing) return;
+
     const chord = eventToChord(e);
     if (!chord) return;
     if (NEVER_INTERCEPT.has(chord)) return;

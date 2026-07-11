@@ -668,7 +668,11 @@ test.describe('settings-driven flows', () => {
     await onboard(page);
     await openSettings(page);
 
-    const templates = page.locator('.group', { hasText: 'Templates' });
+    // Anchor on the group LABEL: a bare hasText also matches the Hotkeys group,
+    // whose command list ("New note from template…") contains the same word.
+    const templates = page.locator('.group', {
+      has: page.locator('.group__label', { hasText: 'Templates' }),
+    });
     await expect(templates.getByText('Template folder location')).toBeVisible();
     const input = templates.locator('input');
     await input.fill('templates');
@@ -702,13 +706,17 @@ test.describe('settings-driven flows', () => {
     await onboard(page);
     await openSettings(page);
 
-    const group = page.locator('.group', { hasText: 'New notes' });
+    // Label-anchored for the same reason as the Templates test above.
+    const group = page.locator('.group', {
+      has: page.locator('.group__label', { hasText: 'New notes' }),
+    });
     await group.getByRole('button', { name: 'Folder', exact: true }).click();
     const folderInput = group.locator('.setting', { hasText: 'New note folder' }).locator('input');
     await folderInput.fill('Projects');
     await folderInput.press('Enter');
 
-    await page.getByRole('button', { name: 'Back' }).click(); // back to the workspace
+    // exact: the Hotkeys rows ("Record new hotkey for Navigate back"…) also match "Back".
+    await page.getByRole('button', { name: 'Back', exact: true }).click(); // back to the workspace
     await newNoteFromPill(page); // creates Untitled in the configured default folder
     await expect(title(page)).toHaveValue('Untitled');
 

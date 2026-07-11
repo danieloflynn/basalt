@@ -5,6 +5,7 @@ import { useNav } from '@/state/nav';
 import { deviceNoun } from '@/lib/device';
 import { timeAgo } from '@/ui/components/SyncStatus';
 import { Dialog } from '@/ui/components/Dialog';
+import { HotkeySettings } from '@/ui/components/HotkeySettings';
 import { OnboardingScreen } from '@/ui/screens/OnboardingScreen';
 import { IconBack, IconChevronRight, IconGit, IconHistory, IconPlus } from '@/ui/icons';
 
@@ -240,6 +241,11 @@ export function SettingsScreen() {
               onChange={(v) => void update({ fontScale: v })}
             />
           </div>
+        </div>
+
+        <div className="group">
+          <p className="group__label">Hotkeys</p>
+          <HotkeySettings />
         </div>
 
         <p
