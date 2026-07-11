@@ -22,9 +22,11 @@ import { SettingsScreen } from '@/ui/screens/SettingsScreen';
 import { BottomPill } from '@/ui/workspace/BottomPill';
 import { defaultNewNoteFolder } from '@/ui/templates';
 import { SidebarToggle } from '@/ui/workspace/chrome';
+import { DesktopChrome } from '@/ui/workspace/DesktopChrome';
 import { DrawerGestures } from '@/ui/workspace/DrawerGestures';
 import { RightSidebar } from '@/ui/workspace/RightSidebar';
 import { Sidebar } from '@/ui/workspace/Sidebar';
+import { useIsDesktop } from '@/ui/hooks/useIsDesktop';
 import { usePullDown } from '@/ui/hooks/usePullDown';
 import './styles/tokens.css';
 import './styles/app.css';
@@ -42,8 +44,23 @@ export function App() {
   const nav = useNav();
   const sidebarOpen = useNav((s) => s.sidebarOpen);
   const rightSidebarOpen = useNav((s) => s.rightSidebarOpen);
+  const isDesktop = useIsDesktop();
   const theme = useSettings((s) => s.settings.theme);
   const fontScale = useSettings((s) => s.settings.fontScale);
+
+  // Desktop docks both sidebars as columns; phone shows one overlay at a time.
+  // Flag nav so its panel/navigation logic stops the mobile "close the other"
+  // behavior, and dock both panels open on entry (Obsidian desktop's default).
+  useEffect(() => {
+    const nav = useNav.getState();
+    nav.setDesktop(isDesktop);
+    nav.setOverlay('none'); // no bottom-pill overlays in docked mode
+    if (isDesktop) {
+      useNav.setState({ sidebarOpen: true, rightSidebarOpen: true });
+    } else {
+      useNav.setState({ sidebarOpen: false, rightSidebarOpen: false });
+    }
+  }, [isDesktop]);
 
   // Boot: load settings, decide onboarding vs vault.
   useEffect(() => {
@@ -134,6 +151,7 @@ export function App() {
 
   const screen = currentScreen(nav);
   const showPill =
+    !isDesktop && // desktop navigates via the tab strip + keyboard, not the pill
     (screen.name === 'empty' ||
       screen.name === 'note' ||
       screen.name === 'edit' ||
@@ -141,7 +159,13 @@ export function App() {
     !nav.editorFocused; // typing: the format toolbar takes the pill's place
 
   return (
-    <div className="shell">
+    <div
+      className="shell"
+      data-desktop={isDesktop || undefined}
+      data-left={isDesktop && sidebarOpen ? '' : undefined}
+      data-right={isDesktop && rightSidebarOpen ? '' : undefined}
+    >
+      {isDesktop && <DesktopChrome />}
       <WorkspaceScreen screen={screen} />
       <div className="banners-layer">
         <Banners />
@@ -149,7 +173,7 @@ export function App() {
       {showPill && <BottomPill />}
       <SidebarLayer open={sidebarOpen} />
       <RightSidebar open={rightSidebarOpen} />
-      <DrawerGestures />
+      {!isDesktop && <DrawerGestures />}
     </div>
   );
 }

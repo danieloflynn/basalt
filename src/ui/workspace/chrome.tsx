@@ -3,11 +3,13 @@ import { useNav } from '@/state/nav';
 /** The top-left sidebar toggle, shared by every workspace screen. */
 export function SidebarToggle() {
   const openSidebar = useNav((s) => s.openSidebar);
+  const toggleSidebar = useNav((s) => s.toggleSidebar);
+  const desktop = useNav((s) => s.desktop);
   return (
     <button
       className="iconbtn workspace-top__group"
-      aria-label="Open sidebar"
-      onClick={() => openSidebar()}
+      aria-label={desktop ? 'Toggle sidebar' : 'Open sidebar'}
+      onClick={() => (desktop ? toggleSidebar() : openSidebar())}
     >
       <svg
         width="20"

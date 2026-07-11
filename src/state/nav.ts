@@ -34,6 +34,19 @@ interface NavState {
   sidebarView: SidebarView;
 
   /**
+   * Desktop (docked) mode: the viewport is wide enough to dock BOTH sidebars as
+   * persistent columns instead of one-at-a-time overlays. App drives this from a
+   * matchMedia query. When true, opening one panel no longer closes the other
+   * and navigating no longer auto-closes them — the panels stay put like
+   * Obsidian desktop. Defaults false, so on phones every guard below is a no-op.
+   */
+  desktop: boolean;
+  setDesktop: (v: boolean) => void;
+  /** Collapse/expand a docked panel (desktop); the toggles the header uses. */
+  toggleSidebar: () => void;
+  toggleRightSidebar: () => void;
+
+  /**
    * Sticky view mode: when 'editing', every note opened via `push` lands in the
    * editor instead of the reader (Obsidian's universal default-view toggle).
    * Held here (nav is self-contained) so `push` can consult it without importing
@@ -81,6 +94,7 @@ export const useNav = create<NavState>((set, get) => ({
   active: 0,
   sidebarOpen: false,
   sidebarView: 'files',
+  desktop: false,
 
   viewMode: 'reading',
   setViewMode: (mode) => set({ viewMode: mode }),
@@ -94,8 +108,9 @@ export const useNav = create<NavState>((set, get) => ({
           ? { name: 'edit', path: screen.path, heading: screen.heading }
           : screen;
       return {
-        sidebarOpen: false,
-        rightSidebarOpen: false,
+        // Docked desktop panels persist across navigation; overlays close.
+        sidebarOpen: s.desktop ? s.sidebarOpen : false,
+        rightSidebarOpen: s.desktop ? s.rightSidebarOpen : false,
         tabs: s.tabs.map((tab, i) => {
           if (i !== s.active) return tab;
           const history = [...tab.history.slice(0, tab.index + 1), eff];
@@ -188,11 +203,20 @@ export const useNav = create<NavState>((set, get) => ({
       searchSeed: null,
     }),
 
+  setDesktop: (v) => set({ desktop: v }),
+  toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
+  toggleRightSidebar: () => set((s) => ({ rightSidebarOpen: !s.rightSidebarOpen })),
+
   openSidebar: (view) =>
-    set((s) => ({ sidebarOpen: true, rightSidebarOpen: false, sidebarView: view ?? s.sidebarView })),
+    set((s) => ({
+      sidebarOpen: true,
+      rightSidebarOpen: s.desktop ? s.rightSidebarOpen : false,
+      sidebarView: view ?? s.sidebarView,
+    })),
   closeSidebar: () => set({ sidebarOpen: false }),
   rightSidebarOpen: false,
-  openRightSidebar: () => set({ rightSidebarOpen: true, sidebarOpen: false }),
+  openRightSidebar: () =>
+    set((s) => ({ rightSidebarOpen: true, sidebarOpen: s.desktop ? s.sidebarOpen : false })),
   closeRightSidebar: () => set({ rightSidebarOpen: false }),
   setSidebarView: (view) => set({ sidebarView: view, searchSeed: null }),
   searchSeed: null,
@@ -212,7 +236,7 @@ export const useNav = create<NavState>((set, get) => ({
         screen ? { history: [HOME, screen], index: 1 } : newTabState(),
       ],
       active: s.tabs.length,
-      sidebarOpen: false,
+      sidebarOpen: s.desktop ? s.sidebarOpen : false,
     })),
 
   closeTab: (index) =>
@@ -226,7 +250,7 @@ export const useNav = create<NavState>((set, get) => ({
   switchTab: (index) =>
     set((s) => ({
       active: Math.max(0, Math.min(index, s.tabs.length - 1)),
-      sidebarOpen: false,
+      sidebarOpen: s.desktop ? s.sidebarOpen : false,
     })),
 }));
 

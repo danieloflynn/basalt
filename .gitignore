@@ -3,6 +3,8 @@ node_modules/
 
 # Build output
 dist/
+electron-dist/
+release/
 
 # Local env
 *.local

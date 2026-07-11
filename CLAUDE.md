@@ -26,6 +26,11 @@ Navigation is per-tab history with back AND forward (`src/state/nav.ts`).
   force regeneration.
 - `npm run build` — `tsc --noEmit` then vite build (keep it green)
 - `npm run sync` — build + `cap sync android`
+- `npm run electron:dev` — bundle main/preload, then launch Electron against the
+  running vite dev server (start `npm run dev` first). `electron:build` =
+  renderer build + `tsc -p electron` + esbuild bundle; `electron:pack` = that,
+  then an unsigned arm64 `.dmg` in `release/`. Electron main/preload are
+  typechecked by `electron/tsconfig.json` (separate from the renderer's `tsc`).
 - Android build: `cd android && JAVA_HOME=$HOME/.local/java/jdk-21.0.11+10/Contents/Home ./gradlew assembleDebug`
   (JDK 21 required; system JDK 26 is too new for AGP. SDK path in `android/local.properties`.)
 
@@ -44,6 +49,74 @@ Navigation is per-tab history with back AND forward (`src/state/nav.ts`).
   `resolveConflictsKeepingBoth` in `BasaltGitPlugin.java`.
 - Vault paths are vault-relative, forward slashes, no leading/trailing `/`
   (`src/lib/paths.ts` helpers).
+
+## Desktop (Mac / Electron)
+
+Basalt also runs as a macOS app. It reuses the SAME `src/` renderer and the SAME
+`dist/` bundle — the web/Android pipeline is untouched. The desktop target is a
+**third implementation of the `GitEngine`/`VaultFS` seam** (`src/engine/desktop.ts`),
+nothing more: those adapters marshal every call over a typed `window.basalt` IPC
+bridge to an Electron main process, where isomorphic-git + Node `fs` + macOS
+Keychain do the real work. Do NOT let desktop code leak past this seam into UI
+components.
+
+- **Layout.** The three-pane desktop chrome (docked file tree ▸ note ▸ backlinks,
+  tab strip) is pure CSS, gated on `.shell[data-desktop]` (viewport `min-width:960px`
+  via `useIsDesktop`). It is independent of Electron — it also shows in a wide
+  browser. Electron presence is a SEPARATE signal (`html.is-electron`, set by the
+  preload) used only for the traffic-light inset. Don't conflate the two.
+- **Engine selection order** (`src/engine/index.ts`): `isDesktopPlatform` (=`!!window.basalt`)
+  is checked BEFORE the Capacitor native check, because Electron reports as a
+  non-native web platform. The preload injects `window.basalt` before any renderer
+  module runs, so the module-load-time check is safe.
+- **The bridge contract is one file:** `src/engine/bridge.ts` (`BasaltBridge`).
+  Renderer `desktop.ts`, preload, and every `ipcMain.handle` in `electron/main.ts`
+  must stay in lockstep with it. fs methods are positional (`dir, path, …`); git
+  methods take a single opts object. `electron/ipc.ts` holds the channel names.
+- **Security invariants (do not weaken):** `contextIsolation:true`,
+  `nodeIntegration:false`; the renderer never touches fs/git directly. `vaultRoot(dir)`
+  in main.ts asserts the vault dir is a strict child of `userData/vaults` (a `..`
+  would let `deleteRepo`'s recursive rm escape). `safeJoin`/protocol handlers guard
+  the leaf path with `abs.startsWith(root + sep)`. A `will-navigate` handler locks
+  top-level nav to `app://`/dev-URL (origin-compared, so a dev reload's trailing
+  slash still counts as internal) so the privileged bridge can't ride into a
+  remote origin (external links → `shell.openExternal`). The PAT is stored ONLY via
+  `safeStorage` (Keychain); `setCredentials` REFUSES to persist if encryption is
+  unavailable rather than fall back to plaintext. **Symlink guards** (a synced repo
+  can commit a symlink): the merge writer refuses to write through any symlink on
+  the target path (`assertNoSymlinkOnPath`, the analogue of isomorphic-git's own
+  `assertNoSymlinkInLeadingPath`), and the `basalt-file://` handler `realpath`s the
+  target and re-checks vault containment so a vault symlink can't stream out-of-vault
+  bytes to the webview. Don't remove these when touching the write/serve paths.
+- **`electron/git/engine.ts` mirrors the JGit plugin's "never lose data" promise.**
+  Same content-hash status (`changesVsHead` re-hashes each `.gitignore`-enumerated
+  path, so a same-size/same-mtime edit isn't missed) and same conflict-keep-both
+  merge (remote keeps the name, local → `Name (conflict …).ext`). **`merge()`
+  commits any uncommitted working-tree change FIRST**, before its force-checkout —
+  an autosave can land between sync's `commitAll` and `merge` (fetch is slow; the
+  push-retry loop re-enters merge without re-committing), and the force-checkout
+  would otherwise silently revert it. Regression test in `engine.node.test.ts`
+  ("UNCOMMITTED local edit present at merge time"). The decision-apply + commit is
+  wrapped so ANY mid-apply throw (e.g. a file⇄dir name swap's ENOTDIR, or the
+  symlink guard) rolls the tree back to a clean `ours` and rethrows — a failed
+  merge never leaves a half-applied tree the next sync would commit as corruption.
+  This engine is Electron-free on purpose so the merge logic is unit-testable in
+  plain Node (`// @vitest-environment node`).
+- **Packaging:** main/preload bundle to `electron-dist/*.cjs` (esbuild). `.cjs` is
+  deliberate — the root package.json is `"type":"module"`, so a bare `.js` would be
+  parsed as ESM and break `require`; `.cjs` also sidesteps Electron's ESM-preload
+  restrictions. `main` field points at `electron-dist/main.cjs`; the preload path is
+  `preload.cjs`. `app://bundle/index.html` serves `dist/` (vite `base` stays `/`, so
+  absolute `/assets` paths resolve). Build output (`electron-dist/`, `release/`) is
+  gitignored.
+- **Reviewed (Opus + Fable adversarial passes).** Verified safe, no change needed:
+  a `.gitignore`'d edit is NOT lost on merge — isomorphic-git's force-checkout
+  preserves ignored/untracked files (tested empirically). Known deferred (low): a
+  file↔directory name swap still wedges the merge (now aborts CLEANLY per the
+  safe-abort above — no corruption/data loss, just a sync error until the user
+  renames the local file); `fetch()` ahead/behind caps at `depth:500` (cosmetic
+  counts only). The symlink findings above were rated reachable only by an untrusted
+  repo (Basalt syncs your own single-author vault) but are fixed regardless.
 
 ## Design system
 
