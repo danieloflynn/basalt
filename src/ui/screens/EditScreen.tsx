@@ -15,6 +15,7 @@ import { takeTemplateFor, useTemplateHandoff } from '@/ui/templates';
 import { InlineTitle } from '@/ui/components/InlineTitle';
 import { IconDots, IconEye } from '@/ui/icons';
 import { NoteMenu } from '@/ui/components/NoteMenu';
+import { PaneHeader } from '@/ui/workspace/PaneHeader';
 import { SidebarToggle } from '@/ui/workspace/chrome';
 import { EditorToolbar } from '@/ui/editor/EditorToolbar';
 import { frontmatter } from '@/ui/editor/frontmatter';
@@ -239,30 +240,34 @@ export function EditScreen({ path }: { path: string }) {
 
   return (
     <div className="screen" style={{ background: 'var(--bg)' }}>
-      <header className="workspace-top">
-        <SidebarToggle />
-        <span className="workspace-top__status">
-          {saveState === 'typing' ? 'Editing…' : noteTitle(path)}
-        </span>
-        <span style={{ flex: 1 }} />
-        <div className="workspace-top__group">
-          <button
-            className="iconbtn iconbtn--accent"
-            aria-label="Reading view"
-            onClick={() => {
-              // Sticky: flip the global default so every note opens to read.
-              nav.setViewMode('reading');
-              void useSettings.getState().update({ defaultView: 'reading' });
-              nav.replace({ name: 'note', path });
-            }}
-          >
-            <IconEye size={20} />
-          </button>
-          <button className="iconbtn" aria-label="Note menu" onClick={() => setMenuOpen(true)}>
-            <IconDots size={20} />
-          </button>
-        </div>
-      </header>
+      {nav.desktop ? (
+        <PaneHeader path={path} mode="editing" onOpenMenu={() => setMenuOpen(true)} />
+      ) : (
+        <header className="workspace-top">
+          <SidebarToggle />
+          <span className="workspace-top__status">
+            {saveState === 'typing' ? 'Editing…' : noteTitle(path)}
+          </span>
+          <span style={{ flex: 1 }} />
+          <div className="workspace-top__group">
+            <button
+              className="iconbtn iconbtn--accent"
+              aria-label="Reading view"
+              onClick={() => {
+                // Sticky: flip the global default so every note opens to read.
+                nav.setViewMode('reading');
+                void useSettings.getState().update({ defaultView: 'reading' });
+                nav.replace({ name: 'note', path });
+              }}
+            >
+              <IconEye size={20} />
+            </button>
+            <button className="iconbtn" aria-label="Note menu" onClick={() => setMenuOpen(true)}>
+              <IconDots size={20} />
+            </button>
+          </div>
+        </header>
+      )}
 
       {/* Pinned above the editor (does not scroll with the document — an
           accepted trade-off vs. threading the title into the CodeMirror doc). */}

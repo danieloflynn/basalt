@@ -142,12 +142,16 @@ export function listCommands(): AppCommand[] {
       run: () => {
         const nav = useNav.getState();
         const screen = currentScreen(nav);
+        // Sticky, same as the mobile header toggle buttons: flipping the mode
+        // also flips the persisted global default (`defaultView` in settings).
         if (screen.name === 'note') {
           nav.replace({ name: 'edit', path: screen.path, heading: screen.heading });
           nav.setViewMode('editing');
+          void useSettings.getState().update({ defaultView: 'editing' });
         } else if (screen.name === 'edit') {
           nav.replace({ name: 'note', path: screen.path, heading: screen.heading });
           nav.setViewMode('reading');
+          void useSettings.getState().update({ defaultView: 'reading' });
         }
       },
     },

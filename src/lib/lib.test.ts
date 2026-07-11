@@ -5,9 +5,19 @@ import { parseFrontmatter, serializeFrontmatter } from './frontmatter';
 import { extractBlock, extractOutline, removeComments, slugifyHeading } from './outline';
 import { extractTags } from './tags';
 import { buildTree, walkFiles } from './tree';
-import { dirname, extname, isHiddenPath, isHtmlPath, joinPath, normalizePath, noteTitle } from './paths';
+import {
+  breadcrumbsFor,
+  dirname,
+  extname,
+  isHiddenPath,
+  isHtmlPath,
+  joinPath,
+  normalizePath,
+  noteTitle,
+} from './paths';
 import { LinkResolver, parseWikilinks, wikilinkDisplayText } from './wikilinks';
 import { stripInlineMarkdown } from './plaintext';
+import { countChars, countWords } from './noteStats';
 import { claimAxis, drawerProgress, FLING_VELOCITY, pullTriggered, settleOpen, velocityX } from './gesture';
 
 describe('paths', () => {
@@ -37,6 +47,33 @@ describe('paths', () => {
     expect(isHiddenPath('.obsidian/app.json')).toBe(true);
     expect(isHiddenPath('notes/.trash/x.md')).toBe(true);
     expect(isHiddenPath('notes/x.md')).toBe(false);
+  });
+
+  it('splits breadcrumbs for the desktop pane header', () => {
+    expect(breadcrumbsFor('Welcome.md')).toEqual([{ label: 'Welcome', isLeaf: true }]);
+    expect(breadcrumbsFor('Projects/Basalt.md')).toEqual([
+      { label: 'Projects', isLeaf: false },
+      { label: 'Basalt', isLeaf: true },
+    ]);
+    expect(breadcrumbsFor('Artifacts/Sync Pulse.html')).toEqual([
+      { label: 'Artifacts', isLeaf: false },
+      { label: 'Sync Pulse', isLeaf: true },
+    ]);
+  });
+});
+
+describe('noteStats', () => {
+  it('counts whitespace-split words', () => {
+    expect(countWords('Hello world')).toBe(2);
+    expect(countWords('  spaced   out   ')).toBe(2);
+    expect(countWords('')).toBe(0);
+    expect(countWords('   ')).toBe(0);
+    expect(countWords('one')).toBe(1);
+  });
+
+  it('counts raw characters', () => {
+    expect(countChars('Hello world')).toBe(11);
+    expect(countChars('')).toBe(0);
   });
 });
 

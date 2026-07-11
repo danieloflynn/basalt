@@ -40,8 +40,34 @@ test('opening a note fills the centre column and lists backlinks', async ({ page
   await expect(page.locator('.inline-title')).toHaveValue('Welcome');
   await expect(page.locator('.sidebar-right')).toContainText('Reading List');
   await expect(page.locator('.desktop-tab[data-active]')).toContainText('Welcome');
+  // Obsidian-parity chrome: per-pane header + bottom-right status bar.
+  await expect(page.locator('.pane-header')).toBeVisible();
+  await expect(page.locator('.status-bar')).toBeVisible();
+  await expect(page.locator('.status-bar')).toHaveText(/\d+ words/);
   await settle(page);
   await expect(page).toHaveScreenshot('desktop-02-note.png');
+});
+
+test('right-clicking a file row opens a compact context menu, not the bottom sheet', async ({ page }) => {
+  await onboard(page);
+  await page.getByRole('button', { name: 'Welcome', exact: true }).click({ button: 'right' });
+  await expect(page.locator('.ctx-menu')).toBeVisible();
+  await expect(page.locator('.ctx-menu')).toContainText('Rename');
+  await expect(page.locator('.sheet')).toHaveCount(0);
+  // Click-away (on note body whitespace) closes it without opening anything.
+  await page.mouse.click(640, 500);
+  await expect(page.locator('.ctx-menu')).toHaveCount(0);
+});
+
+test('the pane ⋮ button opens an anchored note menu on desktop', async ({ page }) => {
+  await onboard(page);
+  await page.getByRole('button', { name: 'Welcome', exact: true }).click();
+  await page.getByRole('button', { name: 'Note menu' }).click();
+  await expect(page.locator('.ctx-menu')).toBeVisible();
+  await expect(page.locator('.ctx-menu')).toContainText('Local graph');
+  await expect(page.locator('.sheet')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.ctx-menu')).toHaveCount(0);
 });
 
 test('collapsing the backlinks panel widens the centre column', async ({ page }) => {

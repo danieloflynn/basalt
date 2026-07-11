@@ -101,3 +101,20 @@ export function sanitizeNoteTitle(raw: string): string {
 export function isHiddenPath(p: string): boolean {
   return p.split('/').some((part) => part.startsWith('.'));
 }
+
+export interface Breadcrumb {
+  /** Folder name (ancestor) or note title (leaf), extension already stripped. */
+  label: string;
+  /** True for the final segment — the note itself, not a folder ancestor. */
+  isLeaf: boolean;
+}
+
+/**
+ * Split a vault path into desktop pane-header breadcrumbs: one entry per
+ * folder ancestor, then the note title with its extension stripped. A
+ * root-level note (`Welcome.md`) yields a single leaf segment.
+ */
+export function breadcrumbsFor(p: string): Breadcrumb[] {
+  const parts = stripExt(p).split('/').filter(Boolean);
+  return parts.map((label, i) => ({ label, isLeaf: i === parts.length - 1 }));
+}

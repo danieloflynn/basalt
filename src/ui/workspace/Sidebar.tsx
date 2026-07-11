@@ -147,12 +147,26 @@ interface TreeDrag {
   y: number;
 }
 
+/**
+ * A pending file-actions sheet/menu: which node, and — only for a real
+ * desktop right-click — the pointer position to anchor a compact context
+ * menu at. Touch long-press (`onLongPress(node)`, no coords) always leaves
+ * `anchor` undefined, so it keeps getting the mobile bottom sheet even in a
+ * desktop-width browser window.
+ */
+interface ActionTarget {
+  node: TreeNode;
+  anchor?: { x: number; y: number };
+}
+
 function FilesPanel() {
   const tree = useVault((s) => s.tree);
   const sortOrder = useSettings((s) => s.settings.sortOrder);
   const { update } = useSettings();
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const [actionTarget, setActionTarget] = useState<TreeNode | null>(null);
+  const [actionTarget, setActionTarget] = useState<ActionTarget | null>(null);
+  const openActions = (node: TreeNode, x?: number, y?: number) =>
+    setActionTarget({ node, anchor: x !== undefined && y !== undefined ? { x, y } : undefined });
   const [creatingFolder, setCreatingFolder] = useState(false);
   const creatingNote = useRef(false);
   const [drag, setDrag] = useState<TreeDrag | null>(null);
@@ -245,7 +259,7 @@ function FilesPanel() {
       const { moved, target } = s;
       finish();
       if (!moved) {
-        setActionTarget(node); // press-and-release: the actions sheet, as ever
+        setActionTarget({ node }); // press-and-release: the actions sheet, as ever
         return;
       }
       if (target === null || target === home) return; // dropped nowhere / back home
@@ -324,7 +338,7 @@ function FilesPanel() {
         depth={0}
         collapsed={collapsed}
         onToggle={toggle}
-        onLongPress={setActionTarget}
+        onLongPress={openActions}
         onArm={beginDrag}
         drag={drag}
       />
@@ -340,7 +354,11 @@ function FilesPanel() {
       )}
 
       {actionTarget && (
-        <FileActionsSheet node={actionTarget} onClose={() => setActionTarget(null)} />
+        <FileActionsSheet
+          node={actionTarget.node}
+          anchor={actionTarget.anchor}
+          onClose={() => setActionTarget(null)}
+        />
       )}
       {/* Folders keep the dialog — they have no inline title to rename by. */}
       {creatingFolder && (
@@ -378,7 +396,8 @@ function TreeLevel({
   depth: number;
   collapsed: Set<string>;
   onToggle: (path: string) => void;
-  onLongPress: (node: TreeNode) => void;
+  /** x/y present only for a real desktop right-click (see ActionTarget). */
+  onLongPress: (node: TreeNode, x?: number, y?: number) => void;
   onArm: (node: TreeNode, x: number, y: number, id: number) => void;
   drag: TreeDrag | null;
 }) {
@@ -439,7 +458,7 @@ function TreeLevel({
  */
 const PRESS_SLOP = 8;
 
-function useLongPress(fire: () => void) {
+function useLongPress(fire: (x?: number, y?: number) => void) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fired = useRef(false);
   const start = useRef({ x: 0, y: 0 });
@@ -453,7 +472,7 @@ function useLongPress(fire: () => void) {
         timer.current = setTimeout(() => {
           timer.current = null;
           fired.current = true;
-          fire();
+          fire(); // touch long-press: no pointer coords, always the sheet
         }, 450);
       },
       onTouchMove: (e: React.TouchEvent) => {
@@ -470,7 +489,9 @@ function useLongPress(fire: () => void) {
       },
       onContextMenu: (e: React.MouseEvent) => {
         e.preventDefault();
-        fire();
+        // Real right-click: pass the pointer position through so desktop can
+        // anchor a compact context menu there instead of the bottom sheet.
+        fire(e.clientX, e.clientY);
       },
     },
   };
@@ -483,7 +504,10 @@ function useLongPress(fire: () => void) {
  * (fingers are never perfectly still); a real scroll kills it, as before.
  * Desktop right-click skips straight to the sheet — there is no drag there.
  */
-function usePressDrag(arm: (x: number, y: number, id: number) => void, sheet: () => void) {
+function usePressDrag(
+  arm: (x: number, y: number, id: number) => void,
+  sheet: (x?: number, y?: number) => void,
+) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fired = useRef(false);
   const start = useRef({ x: 0, y: 0, id: -1 });
@@ -522,7 +546,7 @@ function usePressDrag(arm: (x: number, y: number, id: number) => void, sheet: ()
         // arming then releasing in place (see beginDrag); only a real mouse
         // right-click, which never fires touchstart, opens it from here.
         if (touched.current) return;
-        sheet();
+        sheet(e.clientX, e.clientY);
       },
     },
   };
@@ -541,13 +565,13 @@ function FolderRow({
   depth: number;
   collapsed: Set<string>;
   onToggle: (path: string) => void;
-  onLongPress: (n: TreeNode) => void;
+  onLongPress: (n: TreeNode, x?: number, y?: number) => void;
   onArm: (n: TreeNode, x: number, y: number, id: number) => void;
   drag: TreeDrag | null;
 }) {
   const isCollapsed = collapsed.has(node.path);
   // Folders aren't draggable (v1) — long-press keeps opening the sheet directly.
-  const { handlers, fired } = useLongPress(() => onLongPress(node));
+  const { handlers, fired } = useLongPress((x, y) => onLongPress(node, x, y));
   // Drop target under the dragged note's finger — never its own home folder.
   const isDrop = drag !== null && drag.target === node.path && drag.home !== node.path;
 
@@ -595,13 +619,13 @@ function FileRow({
   node: TreeNode;
   depth: number;
   active: boolean;
-  onLongPress: (n: TreeNode) => void;
+  onLongPress: (n: TreeNode, x?: number, y?: number) => void;
   onArm: (n: TreeNode, x: number, y: number, id: number) => void;
   drag: TreeDrag | null;
 }) {
   const { handlers, fired } = usePressDrag(
     (x, y, id) => onArm(node, x, y, id),
-    () => onLongPress(node),
+    (x, y) => onLongPress(node, x, y),
   );
   const isMd = isMarkdownPath(node.path);
   const isArtifact = isHtmlPath(node.path);

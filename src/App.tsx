@@ -29,6 +29,7 @@ import { OverlayHost } from '@/ui/workspace/OverlayHost';
 import { Ribbon } from '@/ui/workspace/Ribbon';
 import { RightSidebar } from '@/ui/workspace/RightSidebar';
 import { Sidebar } from '@/ui/workspace/Sidebar';
+import { StatusBar as DesktopStatusBar } from '@/ui/workspace/StatusBar';
 import { useIsDesktop } from '@/ui/hooks/useIsDesktop';
 import { usePullDown } from '@/ui/hooks/usePullDown';
 import './styles/tokens.css';
@@ -176,6 +177,7 @@ export function App() {
       {isDesktop && <Ribbon />}
       {isDesktop && <DesktopChrome />}
       <WorkspaceScreen screen={screen} />
+      {isDesktop && <DesktopStatusBar />}
       <div className="banners-layer">
         <Banners />
       </div>
