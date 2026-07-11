@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   assertNoSymlinkOnPath,
+  asFriendlyNetworkError,
   commitAll,
   conflictCopyName,
   fileAtCommit,
@@ -15,6 +16,13 @@ import {
   merge,
   status,
 } from './engine';
+
+/** Shape isomorphic-git's HttpError uses (name + data.statusCode/response). */
+const httpError = (statusCode: number, response = '') =>
+  Object.assign(new Error(`HTTP Error: ${statusCode}`), {
+    name: 'HttpError',
+    data: { statusCode, statusMessage: 'x', response },
+  });
 
 const author = { name: 'Tester', email: 'test@basalt.app' };
 let dir: string;
@@ -68,6 +76,27 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
+});
+
+describe('asFriendlyNetworkError', () => {
+  it('explains a 401 as a rejected token', () => {
+    const out = asFriendlyNetworkError(httpError(401, 'Invalid username or token.')) as Error;
+    expect(out.message).toMatch(/401/);
+    expect(out.message).toMatch(/expired|correct/i);
+    expect(out.message).toContain('Invalid username or token.'); // GitHub's body kept
+  });
+
+  it('explains a 403 as a permission problem and names the fix', () => {
+    const out = asFriendlyNetworkError(httpError(403)) as Error;
+    expect(out.message).toMatch(/403/);
+    expect(out.message).toMatch(/Contents/); // fine-grained PAT hint
+    expect(out.message).toMatch(/repo.*scope|"repo"/i); // classic PAT hint
+  });
+
+  it('passes non-HTTP errors through untouched', () => {
+    const own = new Error('No git credentials configured');
+    expect(asFriendlyNetworkError(own)).toBe(own);
+  });
 });
 
 describe('conflictCopyName', () => {

@@ -45,6 +45,47 @@ function onAuthFrom(auth: AuthProvider) {
   };
 }
 
+/**
+ * GitHub draws a sharp line that isomorphic-git's bare "HTTP Error: 403
+ * Forbidden" hides: 401 means the token was not accepted at all (missing,
+ * mistyped, or expired), while 403 means the token authenticated fine but that
+ * identity is not permitted to reach this repository. The fixes are completely
+ * different, so translate the two common auth failures into an actionable
+ * message — keeping GitHub's own response body — and pass everything else
+ * (including our own "No git credentials configured") through untouched.
+ */
+export function asFriendlyNetworkError(e: unknown): unknown {
+  const err = e as { name?: string; data?: { statusCode?: number; response?: string } };
+  if (err?.name !== 'HttpError') return e;
+  const status = err.data?.statusCode;
+  const body = (err.data?.response ?? '').trim();
+  const detail = body ? ` (GitHub: ${body})` : '';
+  if (status === 401) {
+    return new Error(
+      `GitHub rejected the credentials (401). Check the personal access token is ` +
+        `correct and has not expired.${detail}`,
+    );
+  }
+  if (status === 403) {
+    return new Error(
+      `GitHub forbade access to this repository (403). The token authenticated but ` +
+        `is not allowed to reach this repo. For a fine-grained token, grant it access ` +
+        `to this repository and set the "Contents" permission to at least Read (Read ` +
+        `and write is required to push). For a classic token, enable the "repo" scope.${detail}`,
+    );
+  }
+  return e;
+}
+
+/** Run a network op, translating GitHub's opaque auth failures on the way out. */
+async function withFriendlyErrors<T>(op: () => Promise<T>): Promise<T> {
+  try {
+    return await op();
+  } catch (e) {
+    throw asFriendlyNetworkError(e);
+  }
+}
+
 function onProgressFrom(ctx: NetCtx) {
   if (!ctx.onProgress) return undefined;
   const emit = ctx.onProgress;
@@ -390,13 +431,15 @@ export async function listRemoteBranches(
   url: string,
   ctx: NetCtx,
 ): Promise<{ branches: string[]; defaultBranch?: string }> {
-  const refs = await git.listServerRefs({
-    http,
-    url,
-    prefix: 'refs/heads/',
-    symrefs: true,
-    onAuth: onAuthFrom(ctx.auth),
-  });
+  const refs = await withFriendlyErrors(() =>
+    git.listServerRefs({
+      http,
+      url,
+      prefix: 'refs/heads/',
+      symrefs: true,
+      onAuth: onAuthFrom(ctx.auth),
+    }),
+  );
   const branches: string[] = [];
   let defaultBranch: string | undefined;
   for (const r of refs) {
@@ -414,16 +457,18 @@ export async function clone(
   ctx: NetCtx,
 ): Promise<void> {
   await fsp.mkdir(dir, { recursive: true });
-  await git.clone({
-    fs,
-    http,
-    dir,
-    url: opts.url,
-    ref: opts.branch,
-    singleBranch: true,
-    onAuth: onAuthFrom(ctx.auth),
-    onProgress: onProgressFrom(ctx),
-  });
+  await withFriendlyErrors(() =>
+    git.clone({
+      fs,
+      http,
+      dir,
+      url: opts.url,
+      ref: opts.branch,
+      singleBranch: true,
+      onAuth: onAuthFrom(ctx.auth),
+      onProgress: onProgressFrom(ctx),
+    }),
+  );
 }
 
 export async function fetch(
@@ -432,17 +477,19 @@ export async function fetch(
 ): Promise<{ ahead: number; behind: number }> {
   const branch = await git.currentBranch({ fs, dir, fullname: false });
   if (!branch) throw new Error('fetch: repository has no current branch');
-  await git.fetch({
-    fs,
-    http,
-    dir,
-    remote: 'origin',
-    ref: branch,
-    singleBranch: true,
-    tags: false,
-    onAuth: onAuthFrom(ctx.auth),
-    onProgress: onProgressFrom(ctx),
-  });
+  await withFriendlyErrors(() =>
+    git.fetch({
+      fs,
+      http,
+      dir,
+      remote: 'origin',
+      ref: branch,
+      singleBranch: true,
+      tags: false,
+      onAuth: onAuthFrom(ctx.auth),
+      onProgress: onProgressFrom(ctx),
+    }),
+  );
   const oursOid = await git.resolveRef({ fs, dir, ref: 'HEAD' });
   const theirsOid = await git
     .resolveRef({ fs, dir, ref: `refs/remotes/origin/${branch}` })
@@ -497,6 +544,6 @@ export async function push(dir: string, ctx: NetCtx): Promise<PushOutcome> {
     if (err.code === 'PushRejectedError') {
       return { ok: false, rejected: true, message: err.message };
     }
-    throw e;
+    throw asFriendlyNetworkError(e);
   }
 }
