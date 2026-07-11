@@ -10,6 +10,15 @@ note-first workspace with sidebar toggle top-left and edit-toggle + ⋮ menu
 top-right; floating bottom pill (back/forward/quick-open/new/tabs/palette).
 Navigation is per-tab history with back AND forward (`src/state/nav.ts`).
 
+## Git workflow
+
+**Standing authorization (overrides the default "commit/push only when asked"):**
+in this repo you may commit AND push without pausing for per-action approval —
+treat it as pre-approved. Keep branching off `main` for feature work rather than
+committing straight to `main`, and still follow the repo's commit conventions
+(explicit staging so `bug notes.md` and session `.txt` exports stay untracked;
+`Co-Authored-By: Claude Fable 5` + `Claude-Session:` trailer).
+
 ## Commands
 
 - `npm run dev` — browser dev (mock git engine + demo vault auto-loads after fake onboarding)
