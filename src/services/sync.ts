@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { getGitEngine, vaultDir, type Author, type GitProgress } from '@/engine';
+import { deviceNoun } from '@/lib/device';
 import { useSettings } from './settings';
 import { vaultService } from './vault';
 
@@ -123,7 +124,7 @@ export class SyncService {
       useSync.setState({ error: null, progress: null, phase: 'committing' });
       await this.engine.commitAll({
         dir,
-        message: `vault: android edits — ${this.stamp()} (${reason})`,
+        message: `vault: ${deviceNoun()} edits — ${this.stamp()} (${reason})`,
         author,
       });
 
@@ -139,7 +140,7 @@ export class SyncService {
         await this.engine.fetch({ dir });
         const merge = await this.engine.merge({
           dir,
-          conflictSuffix: `from phone ${this.stamp().replace(':', '.')}`,
+          conflictSuffix: `from ${deviceNoun()} ${this.stamp().replace(':', '.')}`,
           author,
         });
         if (merge.result !== 'up-to-date') pulledSomething = true;

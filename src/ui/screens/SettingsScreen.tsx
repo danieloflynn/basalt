@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { getGitEngine, setVaultDir } from '@/engine';
 import { syncService, useSettings, useSync, vaultService, type VaultInfo } from '@/services';
 import { useNav } from '@/state/nav';
+import { deviceNoun } from '@/lib/device';
 import { timeAgo } from '@/ui/components/SyncStatus';
 import { Dialog } from '@/ui/components/Dialog';
 import { OnboardingScreen } from '@/ui/screens/OnboardingScreen';
@@ -91,7 +92,7 @@ export function SettingsScreen() {
               </span>
               <div className="setting__body">
                 <p className="setting__label">Add vault</p>
-                <p className="setting__desc">Clone another repository to this phone</p>
+                <p className="setting__desc">Clone another repository to this {deviceNoun()}</p>
               </div>
             </button>
             <button className="setting" onClick={() => nav.push({ name: 'history' })}>
@@ -132,7 +133,7 @@ export function SettingsScreen() {
               value={settings.autoPushDebounceSec}
               desc={
                 settings.autoPushDebounceSec === null
-                  ? 'Changes wait until you tap sync'
+                  ? 'Changes wait until you sync manually'
                   : `Changes push ~${settings.autoPushDebounceSec === 30 ? '30 seconds' : '5 minutes'} after you stop typing`
               }
               onChange={(v) => {

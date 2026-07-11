@@ -23,7 +23,7 @@ export function SyncStatus() {
   return (
     <button
       className="iconbtn"
-      aria-label={`Sync: ${label(state)}. Tap to sync now.`}
+      aria-label={`Sync: ${label(state)}. Sync now.`}
       onClick={() => void syncService.syncNow('manual')}
     >
       <div className="sync-columns" data-state={state}>

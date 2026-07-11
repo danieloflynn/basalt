@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { getGitEngine, useSyncProgress } from '@/engine/hooks';
 import { setVaultDir } from '@/engine';
 import { syncService, useSettings, vaultService } from '@/services';
+import { deviceNoun, keystoreName } from '@/lib/device';
 import { IconBack, IconChevronRight } from '@/ui/icons';
 
 type Step = 'welcome' | 'connect' | 'branch' | 'cloning';
@@ -192,7 +193,7 @@ export function OnboardingScreen({
               <>
                 <Field
                   label="GitHub username"
-                  hint="Used for commits made from this phone"
+                  hint={`Used for commits made from this ${deviceNoun()}`}
                   value={username}
                   onChange={setUsername}
                   placeholder="danieloflynn"
@@ -214,7 +215,7 @@ export function OnboardingScreen({
                       lineHeight: 1.5,
                     }}
                   >
-                    This replaces the token used for every vault on this phone.
+                    This replaces the token used for every vault on this {deviceNoun()}.
                   </p>
                 )}
               </>
@@ -244,7 +245,7 @@ export function OnboardingScreen({
                   textAlign: 'center',
                 }}
               >
-                The token is stored in Android's secure keystore, on this phone only.
+                The token is stored in {keystoreName()}, on this {deviceNoun()} only.
               </p>
             )}
           </div>

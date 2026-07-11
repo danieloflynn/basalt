@@ -82,7 +82,7 @@ export function HistoryScreen({ path }: { path?: string }) {
         )}
         {path && commits && commits.length > 0 && (
           <p style={{ fontSize: 'var(--text-xs)', color: 'var(--text-faint)', padding: '12px 4px' }}>
-            Tap a commit to see that version and restore it.
+            Select a commit to see that version and restore it.
           </p>
         )}
       </div>

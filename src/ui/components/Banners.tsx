@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { syncService, useSync } from '@/services';
 import { openNote } from '@/state/nav';
 import { noteTitle } from '@/lib/paths';
+import { deviceNoun, deviceNounPossessive } from '@/lib/device';
 import { IconX } from '@/ui/icons';
 
 /** Conflict and sync-error notices (SY-4, D-2). Rendered under the top bar. */
@@ -20,8 +21,8 @@ export function Banners() {
           <div className="banner__body">
             <p className="banner__title">Both versions kept</p>
             <p>
-              A note changed on this phone and elsewhere at the same time. Your phone's
-              version was saved as{' '}
+              A note changed on this {deviceNoun()} and elsewhere at the same time.{' '}
+              {deviceNounPossessive()} version was saved as{' '}
               {conflictCopies.map((p, i) => (
                 <span key={p}>
                   {i > 0 && ', '}
