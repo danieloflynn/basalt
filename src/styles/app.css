@@ -1389,6 +1389,17 @@ textarea.inline-title::placeholder {
   margin-top: 6px;
 }
 
+/* Command palette hotkey hint, right-aligned in the row (Obsidian shows the
+   assigned shortcut per command). `.tree-row__name` is flex:1, so this just
+   falls in after it. */
+.palette-hint {
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+  white-space: nowrap;
+  margin-left: 8px;
+}
+
 /* ---------- Diff ---------- */
 
 .diff {
@@ -1669,6 +1680,24 @@ textarea.inline-title::placeholder {
 /* No dimming scrims, no bottom-pill gutter when docked. */
 .shell[data-desktop] > .scrim {
   display: none;
+}
+
+/* …except overlay scrims (palette / quick switcher): keep them clickable so
+   click-outside closes the modal, just without the mobile dimming. */
+.shell[data-desktop] > .scrim.scrim--overlay {
+  display: block;
+  background: transparent;
+}
+
+/* Quick switcher / command palette: on desktop these float as a centered
+   top modal (Obsidian), not the mobile bottom-anchored sheet. */
+.shell[data-desktop] > .quickopen {
+  left: 50%;
+  right: auto;
+  top: 120px;
+  transform: translateX(-50%);
+  width: 560px;
+  max-width: calc(100vw - 40px);
 }
 
 .shell[data-desktop] .sidebar__content {

@@ -10,6 +10,7 @@ import {
   vaultService,
 } from '@/services';
 import { currentScreen, openNote, useNav, type Screen } from '@/state/nav';
+import { installGlobalHotkeys } from '@/services/hotkeys';
 import { Banners } from '@/ui/components/Banners';
 import { IconCalendar, IconNotePlus } from '@/ui/icons';
 import { ArtifactScreen } from '@/ui/screens/ArtifactScreen';
@@ -24,6 +25,7 @@ import { defaultNewNoteFolder } from '@/ui/templates';
 import { SidebarToggle } from '@/ui/workspace/chrome';
 import { DesktopChrome } from '@/ui/workspace/DesktopChrome';
 import { DrawerGestures } from '@/ui/workspace/DrawerGestures';
+import { OverlayHost } from '@/ui/workspace/OverlayHost';
 import { RightSidebar } from '@/ui/workspace/RightSidebar';
 import { Sidebar } from '@/ui/workspace/Sidebar';
 import { useIsDesktop } from '@/ui/hooks/useIsDesktop';
@@ -108,6 +110,11 @@ export function App() {
     return () => mq.removeEventListener('change', apply);
   }, [theme, fontScale]);
 
+  // Global keyboard shortcuts (desktop): command palette, quick switcher, nav,
+  // etc. Installed once for the app's lifetime — commands/hotkeys read fresh
+  // state on every keydown, so this effect never needs to re-run.
+  useEffect(() => installGlobalHotkeys(), []);
+
   // Android hardware/gesture back (P-6).
   useEffect(() => {
     if (!isNativePlatform) return;
@@ -170,6 +177,7 @@ export function App() {
       <div className="banners-layer">
         <Banners />
       </div>
+      <OverlayHost />
       {showPill && <BottomPill />}
       <SidebarLayer open={sidebarOpen} />
       <RightSidebar open={rightSidebarOpen} />

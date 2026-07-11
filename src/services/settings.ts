@@ -43,6 +43,11 @@ export interface Settings {
   // Files
   sortOrder: 'name' | 'modified';
 
+  // Hotkeys (desktop global shortcuts). Per-command chord overrides; an
+  // override replaces the default list for that command id, an empty array
+  // explicitly unbinds it. See `src/services/hotkeys.ts` for the defaults.
+  hotkeys?: Record<string, string[]>;
+
   // Graph view (filters, groups, display, forces — one persisted blob).
   graph: GraphConfig;
 
@@ -78,6 +83,7 @@ export const DEFAULT_SETTINGS: Settings = {
   newNoteLocation: 'root',
   newNoteFolderPath: '',
   sortOrder: 'name',
+  hotkeys: {},
   graph: DEFAULT_GRAPH_CONFIG,
   vaults: [],
   activeVault: 'vault',

@@ -61,7 +61,7 @@ export function QuickOpen({ onClose }: { onClose: () => void }) {
 
   return (
     <>
-      <div className="scrim" onClick={onClose} />
+      <div className="scrim scrim--overlay" onClick={onClose} />
       <div className="quickopen">
         <input
           ref={inputRef}
