@@ -117,7 +117,11 @@ components.
   restrictions. `main` field points at `electron-dist/main.cjs`; the preload path is
   `preload.cjs`. `app://bundle/index.html` serves `dist/` (vite `base` stays `/`, so
   absolute `/assets` paths resolve). Build output (`electron-dist/`, `release/`) is
-  gitignored.
+  gitignored. **App icon:** source of truth is `build/icon.svg` (the four
+  molten-capped basalt columns — the sync-indicator signature, basalt-black +
+  ember); regenerate `build/icon.icns` with
+  `rsvg-convert` into an `.iconset` then `iconutil -c icns` (both committed;
+  wired via electron-builder `mac.icon`).
 - **Reviewed (Opus + Fable adversarial passes).** Verified safe, no change needed:
   a `.gitignore`'d edit is NOT lost on merge — isomorphic-git's force-checkout
   preserves ignored/untracked files (tested empirically). Known deferred (low): a
