@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { tabLabel, useNav } from '@/state/nav';
-import { IconCheck, IconChevronRight, IconPlus, IconX } from '@/ui/icons';
+import { useAnchoredMenu, type AnchorPoint } from '@/ui/hooks/useAnchoredMenu';
+import { IconCheck, IconChevronRight, IconPin, IconPlus, IconX } from '@/ui/icons';
 import { VIEWS } from './Sidebar';
 
 /**
@@ -20,6 +21,8 @@ export function DesktopChrome() {
   const sidebarView = useNav((s) => s.sidebarView);
   const nav = useNav();
   const [tabListOpen, setTabListOpen] = useState(false);
+  // Right-clicked tab context menu (Pin/Unpin, Close), Obsidian-style.
+  const [tabMenu, setTabMenu] = useState<{ index: number; anchor: AnchorPoint } | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Click-away / Escape closes the tab-list popup, mirroring VaultMenu's popup
@@ -99,7 +102,12 @@ export function DesktopChrome() {
             tabIndex={0}
             className="desktop-tab"
             data-active={i === active || undefined}
+            data-pinned={tab.pinned || undefined}
             onClick={() => nav.switchTab(i)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setTabMenu({ index: i, anchor: { x: e.clientX, y: e.clientY } });
+            }}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
@@ -108,22 +116,53 @@ export function DesktopChrome() {
             }}
           >
             <span className="desktop-tab__label">{tabLabel(tab)}</span>
-            <button
-              className="desktop-tab__close"
-              aria-label={`Close ${tabLabel(tab)}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                nav.closeTab(i);
-              }}
-            >
-              <IconX size={14} />
-            </button>
+            {tab.pinned ? (
+              // Pinned: the pin badge replaces the close button (a pinned tab
+              // refuses to close); clicking it unpins, like Obsidian.
+              <button
+                className="desktop-tab__close desktop-tab__pin"
+                aria-label={`Unpin ${tabLabel(tab)}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  nav.togglePin(i);
+                }}
+              >
+                <IconPin size={13} />
+              </button>
+            ) : (
+              <button
+                className="desktop-tab__close"
+                aria-label={`Close ${tabLabel(tab)}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  nav.closeTab(i);
+                }}
+              >
+                <IconX size={14} />
+              </button>
+            )}
           </div>
         ))}
         <button className="desktop-tab__new" aria-label="New tab" onClick={() => nav.newTab()}>
           <IconPlus size={16} />
         </button>
       </div>
+
+      {tabMenu && (
+        <TabContextMenu
+          anchor={tabMenu.anchor}
+          pinned={tabs[tabMenu.index]?.pinned ?? false}
+          onPin={() => {
+            nav.togglePin(tabMenu.index);
+            setTabMenu(null);
+          }}
+          onCloseTab={() => {
+            nav.closeTab(tabMenu.index);
+            setTabMenu(null);
+          }}
+          onClose={() => setTabMenu(null)}
+        />
+      )}
 
       <div className="desktop-chrome__drag" aria-hidden="true" />
 
@@ -179,6 +218,50 @@ export function DesktopChrome() {
           <rect x="3" y="4" width="18" height="16" rx="3" />
           <path d="M14.5 4v16" />
         </svg>
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Right-click menu for a tab: Pin/Unpin plus Close, reusing the same
+ * `.ctx-menu`/`.sheet__item` anchored-popup pattern as the file tree's
+ * context menus. Close is disabled while pinned (a pinned tab refuses to
+ * close — unpin first, like Obsidian).
+ */
+function TabContextMenu({
+  anchor,
+  pinned,
+  onPin,
+  onCloseTab,
+  onClose,
+}: {
+  anchor: AnchorPoint;
+  pinned: boolean;
+  onPin: () => void;
+  onCloseTab: () => void;
+  onClose: () => void;
+}) {
+  const { ref, style } = useAnchoredMenu({ anchor, onClose });
+  return (
+    <div ref={ref} className="ctx-menu" role="menu" aria-label="Tab options" style={style}>
+      <button className="sheet__item" role="menuitem" onClick={onPin}>
+        <span className="row__icon">
+          <IconPin size={19} />
+        </span>
+        {pinned ? 'Unpin' : 'Pin'}
+      </button>
+      <button
+        className="sheet__item"
+        role="menuitem"
+        disabled={pinned}
+        aria-disabled={pinned}
+        onClick={onCloseTab}
+      >
+        <span className="row__icon">
+          <IconX size={19} />
+        </span>
+        Close
       </button>
     </div>
   );

@@ -22,6 +22,12 @@ export interface Tab {
   /** Visited screens; index points at the current one (enables forward). */
   history: Screen[];
   index: number;
+  /**
+   * Pinned (Obsidian): the tab's content is locked — navigation from it opens
+   * a new tab beside it, back/forward are disabled, and close is refused until
+   * unpinned. Only the desktop tab strip exposes pinning.
+   */
+  pinned?: boolean;
 }
 
 const HOME: Screen = { name: 'empty' };
@@ -87,6 +93,8 @@ interface NavState {
   newTab: (screen?: Screen) => void;
   closeTab: (index: number) => void;
   switchTab: (index: number) => void;
+  /** Pin/unpin a tab (desktop tab strip). */
+  togglePin: (index: number) => void;
 }
 
 export const useNav = create<NavState>((set, get) => ({
@@ -107,14 +115,30 @@ export const useNav = create<NavState>((set, get) => ({
         s.viewMode === 'editing' && screen.name === 'note'
           ? { name: 'edit', path: screen.path, heading: screen.heading }
           : screen;
+      const tab = s.tabs[s.active];
+      const cur = tab.history[tab.index];
+      // A pinned tab's content is locked: navigating to a DIFFERENT file opens
+      // a new tab beside it (Obsidian). Same-file pushes (outline heading
+      // jumps, reader⇄editor reroutes) still land in the pinned tab.
+      const sameFile = 'path' in eff && 'path' in cur && eff.path === cur.path;
+      if (tab.pinned && !sameFile) {
+        const tabs = [...s.tabs];
+        tabs.splice(s.active + 1, 0, { history: [HOME, eff], index: 1 });
+        return {
+          sidebarOpen: s.desktop ? s.sidebarOpen : false,
+          rightSidebarOpen: s.desktop ? s.rightSidebarOpen : false,
+          tabs,
+          active: s.active + 1,
+        };
+      }
       return {
         // Docked desktop panels persist across navigation; overlays close.
         sidebarOpen: s.desktop ? s.sidebarOpen : false,
         rightSidebarOpen: s.desktop ? s.rightSidebarOpen : false,
-        tabs: s.tabs.map((tab, i) => {
-          if (i !== s.active) return tab;
-          const history = [...tab.history.slice(0, tab.index + 1), eff];
-          return { history, index: history.length - 1 };
+        tabs: s.tabs.map((t, i) => {
+          if (i !== s.active) return t;
+          const history = [...t.history.slice(0, t.index + 1), eff];
+          return { ...t, history, index: history.length - 1 };
         }),
       };
     }),
@@ -161,7 +185,8 @@ export const useNav = create<NavState>((set, get) => ({
       return true;
     }
     const tab = tabs[active];
-    if (tab.index === 0) return false;
+    // Pinned tabs don't navigate — not even through their own history.
+    if (tab.pinned || tab.index === 0) return false;
     set({
       tabs: tabs.map((t, i) => (i === active ? { ...t, index: t.index - 1 } : t)),
     });
@@ -171,7 +196,7 @@ export const useNav = create<NavState>((set, get) => ({
   forward: () => {
     const { tabs, active } = get();
     const tab = tabs[active];
-    if (tab.index >= tab.history.length - 1) return false;
+    if (tab.pinned || tab.index >= tab.history.length - 1) return false;
     set({
       tabs: tabs.map((t, i) => (i === active ? { ...t, index: t.index + 1 } : t)),
     });
@@ -180,13 +205,14 @@ export const useNav = create<NavState>((set, get) => ({
 
   canBack: () => {
     const { tabs, active } = get();
-    return tabs[active].index > 0;
+    const tab = tabs[active];
+    return !tab.pinned && tab.index > 0;
   },
 
   canForward: () => {
     const { tabs, active } = get();
     const tab = tabs[active];
-    return tab.index < tab.history.length - 1;
+    return !tab.pinned && tab.index < tab.history.length - 1;
   },
 
   reset: () =>
@@ -241,6 +267,8 @@ export const useNav = create<NavState>((set, get) => ({
 
   closeTab: (index) =>
     set((s) => {
+      // A pinned tab refuses to close (Obsidian) — unpin first.
+      if (s.tabs[index]?.pinned) return s;
       if (s.tabs.length <= 1) return { tabs: [newTabState()], active: 0 };
       const tabs = s.tabs.filter((_, i) => i !== index);
       const active = index < s.active ? s.active - 1 : s.active;
@@ -251,6 +279,11 @@ export const useNav = create<NavState>((set, get) => ({
     set((s) => ({
       active: Math.max(0, Math.min(index, s.tabs.length - 1)),
       sidebarOpen: s.desktop ? s.sidebarOpen : false,
+    })),
+
+  togglePin: (index) =>
+    set((s) => ({
+      tabs: s.tabs.map((t, i) => (i === index ? { ...t, pinned: !t.pinned } : t)),
     })),
 }));
 

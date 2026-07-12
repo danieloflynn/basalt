@@ -368,3 +368,33 @@ test('a source linking twice shows count 2 and two snippets', async ({ page }) =
   // + Sync Pulse artifact 1.
   await expect(panel.locator('.rightbar__total')).toHaveText('5');
 });
+
+/**
+ * Pinned tabs (Obsidian): right-click a tab to pin it — a pin badge replaces
+ * the close button, navigation opens a NEW tab beside it instead of replacing
+ * its note, and Close in the context menu is disabled until unpinned.
+ */
+test('pinning a tab locks its note and routes navigation to a new tab', async ({ page }) => {
+  await onboard(page);
+  await page.locator('.filetree').getByRole('button', { name: 'Welcome', exact: true }).click();
+
+  const welcomeTab = page.locator('.desktop-tab', { hasText: 'Welcome' });
+  await welcomeTab.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Pin', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Unpin Welcome' })).toBeVisible();
+
+  // Navigating from the pinned tab spawns a fresh tab beside it.
+  await page.locator('.filetree').getByRole('button', { name: 'Reading List', exact: true }).click();
+  await expect(page.locator('.desktop-tab')).toHaveCount(2);
+  await expect(page.locator('.desktop-tab[data-active]')).toContainText('Reading List');
+  await expect(welcomeTab).toContainText('Welcome');
+
+  // Close is disabled on the pinned tab's menu.
+  await welcomeTab.click({ button: 'right' });
+  await expect(page.getByRole('menuitem', { name: 'Close' })).toBeDisabled();
+  await page.keyboard.press('Escape');
+
+  // Clicking the pin badge unpins: the close button comes back.
+  await page.getByRole('button', { name: 'Unpin Welcome' }).click();
+  await expect(page.getByRole('button', { name: 'Close Welcome' })).toBeVisible();
+});

@@ -1888,6 +1888,19 @@ textarea.inline-title::placeholder {
   color: var(--text);
 }
 
+/* The pin badge is state, not an affordance — always visible on a pinned
+   tab, unlike the hover-revealed close button it replaces. */
+.desktop-tab__pin {
+  opacity: 1;
+  color: var(--text-muted);
+}
+
+/* Tab context menu: Close is disabled while pinned. */
+.sheet__item:disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
 .desktop-tab__new {
   display: inline-flex;
   align-items: center;

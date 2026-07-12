@@ -192,3 +192,58 @@ describe('nav reset', () => {
     expect(nav().searchSeed).toBeNull();
   });
 });
+
+describe('pinned tabs', () => {
+  beforeEach(() => nav().reset());
+
+  it('push from a pinned tab opens a new tab beside it instead of navigating', () => {
+    nav().push({ name: 'note', path: 'a.md' });
+    nav().togglePin(0);
+    nav().push({ name: 'note', path: 'b.md' });
+
+    expect(nav().tabs).toHaveLength(2);
+    expect(nav().active).toBe(1);
+    expect(currentScreen(nav())).toEqual({ name: 'note', path: 'b.md' });
+    // The pinned tab still shows a.md, and the new tab is not pinned.
+    expect(nav().tabs[0].history[nav().tabs[0].index]).toEqual({ name: 'note', path: 'a.md' });
+    expect(nav().tabs[1].pinned).toBeUndefined();
+  });
+
+  it('the new tab is inserted directly after the pinned tab, not at the end', () => {
+    nav().push({ name: 'note', path: 'a.md' });
+    nav().newTab({ name: 'note', path: 'z.md' });
+    nav().switchTab(0);
+    nav().togglePin(0);
+    nav().push({ name: 'note', path: 'b.md' });
+    expect(nav().tabs).toHaveLength(3);
+    expect(nav().active).toBe(1);
+    expect(tabLabel(nav().tabs[1])).toBe('b');
+    expect(tabLabel(nav().tabs[2])).toBe('z');
+  });
+
+  it('same-file pushes (heading jumps, reader/editor reroutes) stay in the pinned tab', () => {
+    nav().push({ name: 'note', path: 'a.md' });
+    nav().togglePin(0);
+    nav().push({ name: 'note', path: 'a.md', heading: 'h2' });
+    expect(nav().tabs).toHaveLength(1);
+    expect(currentScreen(nav())).toEqual({ name: 'note', path: 'a.md', heading: 'h2' });
+    expect(nav().tabs[0].pinned).toBe(true);
+  });
+
+  it('a pinned tab refuses to close and blocks back/forward', () => {
+    nav().push({ name: 'note', path: 'a.md' });
+    nav().push({ name: 'note', path: 'a.md', heading: 'h2' });
+    nav().togglePin(0);
+
+    expect(nav().canBack()).toBe(false);
+    expect(nav().back()).toBe(false);
+    nav().closeTab(0);
+    expect(nav().tabs).toHaveLength(1);
+    expect(nav().tabs[0].pinned).toBe(true);
+
+    nav().togglePin(0);
+    expect(nav().canBack()).toBe(true);
+    expect(nav().back()).toBe(true);
+    expect(nav().canForward()).toBe(true);
+  });
+});
