@@ -322,3 +322,24 @@ test('adding and removing a tags array item writes through', async ({ page }) =>
   await expect(tagsRow.locator('.props-expanded__tag')).toHaveCount(2);
   await expect(tagsRow).not.toContainText('newtag');
 });
+
+/**
+ * Desktop graph view: pane-header chrome (not the mobile circular back
+ * button) and the settings panel as a floating card without a scrim.
+ */
+test('the graph view uses the pane header and a floating settings card', async ({ page }) => {
+  await onboard(page);
+  await page.getByRole('button', { name: 'Graph view' }).click(); // ribbon
+  await expect(page.locator('.pane-header')).toBeVisible();
+  await expect(page.locator('.pane-header')).toContainText('Graph view');
+  await expect(page.locator('.workspace-top')).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Graph settings' }).click();
+  const panel = page.locator('.graph-panel');
+  await expect(panel).toBeVisible();
+  await expect(panel).toContainText('Filters');
+  // No scrim on desktop — the card floats while the canvas stays usable.
+  await expect(page.locator('.graph-panel__scrim')).not.toBeVisible();
+  await page.getByRole('button', { name: 'Close graph settings' }).click();
+  await expect(panel).toHaveCount(0);
+});

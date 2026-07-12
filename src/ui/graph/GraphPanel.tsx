@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react';
+import { useNav } from '@/state/nav';
 import { IconChevronRight, IconPlus, IconX } from '@/ui/icons';
 import { GRAPH_PALETTE, type GraphConfig, type GraphGroup } from './config';
 
@@ -18,11 +19,15 @@ function newGroupId(): string {
 
 /** Graph settings panel: filters, groups, display and forces. */
 export function GraphPanel({ config, onChange, onClose, onAnimate }: Props) {
+  // Desktop floats this panel as a compact card (Obsidian-style), so its
+  // sections start collapsed; the mobile full-height drawer keeps them open.
+  // The panel unmounts on close, so this re-evaluates on every open.
+  const desktop = useNav.getState().desktop;
   const [open, setOpen] = useState<Record<Section, boolean>>({
-    filters: true,
-    groups: true,
-    display: true,
-    forces: true,
+    filters: !desktop,
+    groups: !desktop,
+    display: !desktop,
+    forces: !desktop,
   });
   const toggleSection = (s: Section) => setOpen((o) => ({ ...o, [s]: !o[s] }));
 
@@ -50,7 +55,10 @@ export function GraphPanel({ config, onChange, onClose, onAnimate }: Props) {
 
   return (
     <>
-      <div className="scrim" onClick={onClose} />
+      {/* graph-panel__scrim: desktop hides just THIS scrim (the panel floats
+          as a card there, Obsidian-style, closed via its X) without touching
+          any other in-screen scrim. */}
+      <div className="scrim graph-panel__scrim" onClick={onClose} />
       <div className="graph-panel" role="dialog" aria-label="Graph settings">
         <header className="graph-panel__head">
           <span>Graph settings</span>

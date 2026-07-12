@@ -2669,3 +2669,34 @@ html.is-electron .shell[data-desktop] {
   padding-top: 4px;
   border-top: 1px solid var(--border);
 }
+
+/* ---------- Desktop graph view (Obsidian parity) ---------- */
+
+/* The settings panel floats as a rounded card below the pane header, top-
+   right of the canvas — Obsidian's graph-settings card — instead of the
+   phone's full-height right drawer. No scrim on desktop: the card stays up
+   while the canvas is used, closed via its X. */
+.shell[data-desktop] .graph-panel__scrim {
+  display: none;
+}
+
+.shell[data-desktop] .graph-panel {
+  top: calc(var(--titlebar-h) + 48px);
+  right: calc(var(--rw) + 14px);
+  bottom: auto;
+  width: 300px;
+  max-height: min(560px, calc(100vh - var(--titlebar-h) - 96px));
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+/* Sentence-case section rows (Filters / Groups / Display / Forces), per the
+   reference card — the drawer's uppercase micro-labels read wrong at card
+   scale. */
+.shell[data-desktop] .graph-panel__section-head {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: var(--text-sm);
+  font-weight: 550;
+  color: var(--text);
+}

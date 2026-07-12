@@ -498,40 +498,84 @@ export function GraphScreen({ path }: { path?: string }) {
     };
   }, [path]);
 
+  const wandButton = (size: number) => (
+    <button
+      className={nav.desktop ? 'iconbtn pane-header__btn' : 'iconbtn'}
+      aria-label="Graph timelapse"
+      aria-pressed={wandActive}
+      style={wandActive ? { color: 'var(--ember)' } : undefined}
+      onClick={() => setWandActive((v) => !v)}
+    >
+      <IconWand size={size} />
+    </button>
+  );
+  const settingsButton = (size: number) => (
+    <button
+      className={nav.desktop ? 'iconbtn pane-header__btn' : 'iconbtn'}
+      aria-label="Graph settings"
+      aria-pressed={panelOpen}
+      style={panelOpen ? { color: 'var(--ember)' } : undefined}
+      onClick={() => setPanelOpen((v) => !v)}
+    >
+      <IconSettings size={size} />
+    </button>
+  );
+
   return (
     <div className="screen">
-      <header className="workspace-top">
-        <button
-          className="iconbtn workspace-top__group"
-          aria-label="Back"
-          onClick={() => nav.back()}
-        >
-          <IconBack size={20} />
-        </button>
-        <span className="workspace-top__status">
-          {path ? `Links around "${noteTitle(path)}"` : 'Graph'}
-        </span>
-        <div className="workspace-top__group" style={{ marginLeft: 'auto' }}>
-          <button
-            className="iconbtn"
-            aria-label="Graph timelapse"
-            aria-pressed={wandActive}
-            style={wandActive ? { color: 'var(--ember)' } : undefined}
-            onClick={() => setWandActive((v) => !v)}
-          >
-            <IconWand size={20} />
-          </button>
-          <button
-            className="iconbtn"
-            aria-label="Graph settings"
-            aria-pressed={panelOpen}
-            style={panelOpen ? { color: 'var(--ember)' } : undefined}
-            onClick={() => setPanelOpen((v) => !v)}
-          >
-            <IconSettings size={20} />
-          </button>
+      {nav.desktop ? (
+        // Same pane-header chrome as the note screens (Obsidian's graph tab):
+        // history arrows, centered title, wand + settings on the right.
+        <div className="pane-header">
+          <div className="pane-header__group">
+            <button
+              className="iconbtn pane-header__btn"
+              aria-label="Back"
+              disabled={!nav.canBack()}
+              onClick={() => nav.back()}
+            >
+              <IconBack size={18} style={{ opacity: nav.canBack() ? 1 : 0.35 }} />
+            </button>
+            <button
+              className="iconbtn pane-header__btn"
+              aria-label="Forward"
+              disabled={!nav.canForward()}
+              onClick={() => nav.forward()}
+            >
+              <IconBack
+                size={18}
+                style={{ transform: 'rotate(180deg)', opacity: nav.canForward() ? 1 : 0.35 }}
+              />
+            </button>
+          </div>
+          <div className="pane-header__crumbs">
+            <span className="pane-header__crumb pane-header__crumb--leaf">
+              {path ? `Links around "${noteTitle(path)}"` : 'Graph view'}
+            </span>
+          </div>
+          <div className="pane-header__group">
+            {wandButton(18)}
+            {settingsButton(18)}
+          </div>
         </div>
-      </header>
+      ) : (
+        <header className="workspace-top">
+          <button
+            className="iconbtn workspace-top__group"
+            aria-label="Back"
+            onClick={() => nav.back()}
+          >
+            <IconBack size={20} />
+          </button>
+          <span className="workspace-top__status">
+            {path ? `Links around "${noteTitle(path)}"` : 'Graph'}
+          </span>
+          <div className="workspace-top__group" style={{ marginLeft: 'auto' }}>
+            {wandButton(20)}
+            {settingsButton(20)}
+          </div>
+        </header>
+      )}
       <canvas ref={canvasRef} style={{ flex: 1, width: '100%', touchAction: 'none' }} />
       {panelOpen && (
         <GraphPanel
