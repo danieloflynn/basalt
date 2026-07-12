@@ -29,6 +29,11 @@ files — readable anywhere, versioned by git.
 - **Offline-first.** Everything works with no connection; sync catches up when
   you're back.
 
+Everything renders straight from plain text — LaTeX math, Mermaid diagrams,
+folded callouts, and live HTML artifacts included:
+
+![LaTeX math, a Mermaid diagram, a folded callout and a sandboxed HTML artifact, all rendered from markdown](docs/screenshots/feature-markdown.png)
+
 ## On your phone
 
 Basalt on Android is built for one-handed capture and comfortable reading:
@@ -42,6 +47,21 @@ editor with a formatting toolbar and live preview.
 Point it at a GitHub repo once — after that, notes commit as you write, pull
 when you open the app, and push after a quiet period. Your vault history is a
 normal git log you can inspect from any machine.
+
+## Every note has a history
+
+Because sync is git, every save is a commit. Open any note's version history,
+see exactly what changed between then and now, and restore an old version —
+the replaced text stays in history, so even restoring is reversible.
+
+![A note's version history showing a red/green diff against the current text](docs/screenshots/feature-history.png)
+
+## Find anything in a keystroke
+
+Fuzzy quick open, a command palette, full-text search, and tag and property
+browsing — the vault stays fast to move through as it grows.
+
+![Quick open matching notes by fuzzy filename and content](docs/screenshots/feature-quickopen.png)
 
 ## On your Mac
 
@@ -59,6 +79,8 @@ Vaults are flexible on Mac:
   sync it using the credentials your command-line git already has (SSH keys,
   credential helpers) — no tokens to paste. Or keep it **local-only** and Basalt
   never touches git at all.
+
+![Opening a folder as a vault: choose between git sync with your CLI credentials, or local-only editing](docs/screenshots/mac-folder-choice.png)
 
 ## Dark first, light always
 
