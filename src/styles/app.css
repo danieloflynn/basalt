@@ -2765,3 +2765,64 @@ html.is-electron .shell[data-desktop] {
 .hover-preview .md {
   font-size: var(--text-sm);
 }
+
+/* ---------- Desktop density & notices (Obsidian parity) ---------- */
+
+/* File-explorer rows: Obsidian desktop is ~26px per row with a subtle 6px
+   highlight radius — the 44px pill rows are phone touch ergonomics. Density
+   only, and only when docked; the mobile tree is untouched. */
+.shell[data-desktop] .tree-row {
+  min-height: 0;
+  padding: 2px 8px;
+  border-radius: var(--r-sm);
+}
+
+/* Vault-bar controls at desktop scale: the sync columns were the full 44px
+   touch target, towering over the gear. 28px buttons (the docked-header
+   convention) with a 13px glyph match Obsidian's bottom-bar icons. */
+.shell[data-desktop] .sidebar__vaultbar .iconbtn {
+  width: 28px;
+  height: 28px;
+}
+
+.shell[data-desktop] .sidebar__vaultbar .sync-columns {
+  height: 13px;
+  gap: 2px;
+  padding: 0 1px;
+}
+
+.shell[data-desktop] .sidebar__vaultbar .sync-columns .col {
+  width: 3px;
+}
+
+/* Sync/conflict notices become bottom-right toasts (Obsidian's notice stack)
+   instead of a full-width strip floating over all three panes. The mobile
+   banner keeps its translucent tint over a single surface; docked, the same
+   tint is layered over an opaque raised surface so the workspace can't bleed
+   through the card. Above the status bar (15) and every overlay (≤50). */
+.shell[data-desktop] .banners-layer {
+  top: auto;
+  left: auto;
+  right: 12px;
+  bottom: 38px;
+  width: 380px;
+  max-width: calc(100vw - 24px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.shell[data-desktop] .banners-layer .banner {
+  margin: 0;
+  background-color: var(--surface-raised);
+  border-radius: var(--r-md);
+}
+
+.shell[data-desktop] .banners-layer .banner--error,
+.shell[data-desktop] .banners-layer .banner--conflict {
+  background-image: linear-gradient(var(--danger-soft), var(--danger-soft));
+}
+
+.shell[data-desktop] .banners-layer .banner--info {
+  background-image: linear-gradient(var(--link-soft), var(--link-soft));
+}
