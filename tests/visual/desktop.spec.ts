@@ -398,3 +398,29 @@ test('pinning a tab locks its note and routes navigation to a new tab', async ({
   await page.getByRole('button', { name: 'Unpin Welcome' }).click();
   await expect(page.getByRole('button', { name: 'Close Welcome' })).toBeVisible();
 });
+
+/**
+ * Page preview (Obsidian's ⌘/Ctrl-hover): holding the modifier while hovering
+ * a reading-view wikilink floats a rendered preview card of the target note;
+ * moving off the link dismisses it; a plain hover shows nothing.
+ */
+test('ctrl-hovering a wikilink floats a page preview of the target note', async ({ page }) => {
+  await onboard(page);
+  await page.locator('.filetree').getByRole('button', { name: 'Welcome', exact: true }).click();
+
+  const link = page.locator('.md a.wikilink', { hasText: 'Reading List' });
+  await link.hover({ modifiers: ['Control'] });
+  const card = page.locator('.hover-preview');
+  await expect(card).toBeVisible();
+  await expect(card.locator('.hover-preview__title')).toHaveText('Reading List');
+  await expect(card).toContainText('See also');
+
+  // Moving off the link dismisses the card.
+  await page.mouse.move(20, 500);
+  await expect(card).toHaveCount(0);
+
+  // A plain hover (no modifier) never shows it.
+  await link.hover();
+  await page.waitForTimeout(450);
+  await expect(card).toHaveCount(0);
+});

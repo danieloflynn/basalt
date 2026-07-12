@@ -21,6 +21,7 @@ import { NoteVersionScreen } from '@/ui/screens/NoteVersionScreen';
 import { OnboardingScreen } from '@/ui/screens/OnboardingScreen';
 import { SettingsScreen } from '@/ui/screens/SettingsScreen';
 import { BottomPill } from '@/ui/workspace/BottomPill';
+import { HoverPreviewCard } from '@/ui/components/HoverPreview';
 import { defaultNewNoteFolder } from '@/ui/templates';
 import { SidebarToggle } from '@/ui/workspace/chrome';
 import { DesktopChrome } from '@/ui/workspace/DesktopChrome';
@@ -178,6 +179,7 @@ export function App() {
       {isDesktop && <DesktopChrome />}
       <WorkspaceScreen screen={screen} />
       {isDesktop && <DesktopStatusBar />}
+      {isDesktop && <HoverPreviewCard />}
       <div className="banners-layer">
         <Banners />
       </div>
