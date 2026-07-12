@@ -194,3 +194,131 @@ test('the header "Collapse results" button folds and unfolds every group', async
   await collapseAll.click();
   await expect(panel.locator('.rightbar__mention')).toHaveCount(3);
 });
+
+/**
+ * WP9: right-sidebar icon tabs (Backlinks | Outline) and the collapsed-by-
+ * default "Unlinked mentions" section under the linked ones.
+ */
+test('the right sidebar switches between backlinks and outline tabs', async ({ page }) => {
+  await onboard(page);
+  await page.getByRole('button', { name: 'Welcome', exact: true }).click();
+  // Backlinks is the default tab.
+  await expect(page.getByRole('tab', { name: 'Backlinks' })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
+  await expect(page.locator('.sidebar-right')).toContainText('Linked mentions');
+
+  await page.getByRole('tab', { name: 'Outline' }).click();
+  const items = page.locator('.rightbar__outline-item');
+  await expect(items).toHaveText(['Welcome to Basalt', 'Try things', 'Tasks']);
+  // Clicking a heading scrolls the reader to it without leaving the note.
+  await items.nth(2).click();
+  await expect(page.locator('.inline-title')).toHaveValue('Welcome');
+  await expect
+    .poll(() => page.locator('.scroll').evaluate((el) => el.scrollTop))
+    .toBeGreaterThan(0);
+});
+
+test('unlinked mentions lists notes that mention the title without linking to it', async ({
+  page,
+}) => {
+  await onboard(page);
+  // Pristine demo vault: nothing mentions "Welcome" without also linking it.
+  await page.getByRole('button', { name: 'Welcome', exact: true }).click();
+  await expect(page.locator('.sidebar-right')).toContainText('Linked mentions');
+  await expect(page.locator('.rightbar__unlinked')).toHaveCount(0);
+
+  // Type a plain-text mention of "Someday" (no wikilink) into another note,
+  // then open Someday: the autosaved edit must surface as an unlinked mention.
+  await page.locator('.filetree').getByRole('button', { name: 'Old Note', exact: true }).click();
+  await page.getByRole('button', { name: 'Edit note' }).click();
+  await page.locator('.cm-content').click();
+  await page.keyboard.type(' Someday plans. ');
+  await page.locator('.filetree').getByRole('button', { name: 'Someday', exact: true }).click();
+
+  const unlinked = page.locator('.rightbar__unlinked');
+  await expect(unlinked).toContainText('Unlinked mentions');
+  await expect(unlinked.locator('.rightbar__group-count').first()).toHaveText('1');
+  // Collapsed by default (Obsidian's default); expanding reveals the source
+  // and its snippet with the matched title marked.
+  await expect(unlinked.locator('.rightbar__mention')).toHaveCount(0);
+  await unlinked.locator('.rightbar__group-head').first().click();
+  await expect(unlinked.locator('.rightbar__mention')).toHaveCount(1);
+  await expect(unlinked.locator('.rightbar__mention mark')).toHaveText('Someday');
+});
+
+/**
+ * WP10: the desktop reader's expanded properties table is editable in place
+ * (Obsidian parity) — edit a scalar value, add/remove array items, and
+ * add/delete whole properties, all writing through vaultService. Uses the
+ * demo vault's Welcome note (title/tags/created frontmatter).
+ */
+function propRow(page: import('@playwright/test').Page, key: string) {
+  return page.locator('.props-expanded__row', {
+    has: page.locator('.props-expanded__key', { hasText: key }),
+  });
+}
+
+test('editing a scalar property value writes through and survives navigating away and back', async ({
+  page,
+}) => {
+  await onboard(page);
+  await page.getByRole('button', { name: 'Welcome', exact: true }).click();
+  const titleValue = propRow(page, 'title').locator('.props-expanded__value--edit');
+  await expect(titleValue).toHaveText('Welcome');
+
+  await titleValue.click();
+  const input = page.locator('.props-expanded__value-input');
+  await input.fill('Welcome Edited');
+  await input.press('Enter');
+  await expect(propRow(page, 'title').locator('.props-expanded__value--edit')).toHaveText(
+    'Welcome Edited',
+  );
+
+  // Navigate away and back — this only shows fresh content if the edit
+  // actually persisted through vaultService.writeNote, not just local state.
+  // Scoped to the file tree: "Reading List" is also a backlink group title
+  // in the right sidebar for this note.
+  await page.locator('.filetree').getByRole('button', { name: 'Reading List', exact: true }).click();
+  await expect(page.locator('.inline-title')).toHaveValue('Reading List');
+  await page.locator('.filetree').getByRole('button', { name: 'Welcome', exact: true }).click();
+  await expect(propRow(page, 'title').locator('.props-expanded__value--edit')).toHaveText(
+    'Welcome Edited',
+  );
+});
+
+test('adding a new property makes it appear, and deleting it removes it', async ({ page }) => {
+  await onboard(page);
+  await page.getByRole('button', { name: 'Welcome', exact: true }).click();
+
+  await page.locator('.props-expanded__add').click();
+  await page.getByLabel('Property name').fill('priority');
+  await page.getByLabel('Property value').fill('high');
+  await page.getByLabel('Property value').press('Enter');
+
+  const row = propRow(page, 'priority');
+  await expect(row).toBeVisible();
+  await expect(row.locator('.props-expanded__value--edit')).toHaveText('high');
+
+  await row.locator('.props-expanded__delete').click();
+  await expect(propRow(page, 'priority')).toHaveCount(0);
+});
+
+test('adding and removing a tags array item writes through', async ({ page }) => {
+  await onboard(page);
+  await page.getByRole('button', { name: 'Welcome', exact: true }).click();
+
+  const tagsRow = propRow(page, 'tags');
+  await expect(tagsRow.locator('.props-expanded__tag')).toHaveCount(2); // basalt, demo
+
+  const addInput = tagsRow.locator('.props-expanded__tag-input');
+  await addInput.fill('newtag');
+  await addInput.press('Enter');
+  await expect(tagsRow.locator('.props-expanded__tag')).toHaveCount(3);
+  await expect(tagsRow).toContainText('newtag');
+
+  await tagsRow.getByRole('button', { name: 'Remove newtag' }).click();
+  await expect(tagsRow.locator('.props-expanded__tag')).toHaveCount(2);
+  await expect(tagsRow).not.toContainText('newtag');
+});

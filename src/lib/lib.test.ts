@@ -19,6 +19,15 @@ import { LinkResolver, parseWikilinks, wikilinkDisplayText } from './wikilinks';
 import { stripInlineMarkdown } from './plaintext';
 import { countChars, countWords } from './noteStats';
 import { claimAxis, drawerProgress, FLING_VELOCITY, pullTriggered, settleOpen, velocityX } from './gesture';
+import {
+  addArrayItem,
+  applyPropertyEdit,
+  coerceScalarInput,
+  isEditableScalar,
+  isEditableStringArray,
+  removeArrayItem,
+  removeProperty,
+} from './propertyEdit';
 
 describe('paths', () => {
   it('normalizes separators and dots', () => {
@@ -373,5 +382,142 @@ describe('gesture math', () => {
     expect(pullTriggered(0, 100)).toBe(true);
     expect(pullTriggered(0, 60)).toBe(false);
     expect(pullTriggered(120, 100)).toBe(false); // diagonal → drawer's business
+  });
+});
+
+describe('propertyEdit', () => {
+  describe('isEditableScalar / isEditableStringArray', () => {
+    it('accepts string/number/boolean as scalars, and all-string arrays as arrays', () => {
+      expect(isEditableScalar('x')).toBe(true);
+      expect(isEditableScalar(42)).toBe(true);
+      expect(isEditableScalar(true)).toBe(true);
+      expect(isEditableScalar(null)).toBe(false);
+      expect(isEditableScalar(new Date())).toBe(false);
+      expect(isEditableScalar({ a: 1 })).toBe(false);
+      expect(isEditableScalar(['a'])).toBe(false);
+
+      expect(isEditableStringArray(['a', 'b'])).toBe(true);
+      expect(isEditableStringArray([])).toBe(true);
+      expect(isEditableStringArray([1, 2])).toBe(false);
+      expect(isEditableStringArray(['a', 1])).toBe(false);
+      expect(isEditableStringArray('a')).toBe(false);
+    });
+  });
+
+  describe('coerceScalarInput (type preservation)', () => {
+    it('keeps a number a number when the input still parses as one', () => {
+      expect(coerceScalarInput(5, '42')).toBe(42);
+      expect(coerceScalarInput(5, '3.5')).toBe(3.5);
+    });
+
+    it('falls back to a string when a number input no longer parses', () => {
+      expect(coerceScalarInput(5, 'abc')).toBe('abc');
+    });
+
+    it('keeps a boolean a boolean when the input reads true/false (case-insensitive)', () => {
+      expect(coerceScalarInput(true, 'false')).toBe(false);
+      expect(coerceScalarInput(false, 'TRUE')).toBe(true);
+    });
+
+    it('falls back to a string when a boolean input is not true/false', () => {
+      expect(coerceScalarInput(true, 'yes')).toBe('yes');
+    });
+
+    it('leaves a string original as a string regardless of the input shape', () => {
+      expect(coerceScalarInput('hello', '42')).toBe('42');
+      expect(coerceScalarInput('hello', 'true')).toBe('true');
+    });
+
+    it('treats an empty input as an empty string, never a deletion signal', () => {
+      expect(coerceScalarInput(5, '')).toBe('');
+      expect(coerceScalarInput(true, '')).toBe('');
+      expect(coerceScalarInput('x', '')).toBe('');
+    });
+  });
+
+  describe('applyPropertyEdit / removeProperty', () => {
+    it('edits an existing key and preserves the body byte-for-byte', () => {
+      const text = '---\ntitle: Hello\ntags: [a, b]\n---\nBody line 1\nBody line 2\n';
+      const out = applyPropertyEdit(text, 'title', 'Goodbye');
+      const fm = parseFrontmatter(out);
+      expect(fm.data.title).toBe('Goodbye');
+      expect(fm.data.tags).toEqual(['a', 'b']);
+      expect(fm.body).toBe('Body line 1\nBody line 2\n');
+    });
+
+    it('adds a brand-new key to a note that already has frontmatter', () => {
+      const text = '---\ntitle: Hello\n---\nBody\n';
+      const out = applyPropertyEdit(text, 'status', 'active');
+      const fm = parseFrontmatter(out);
+      expect(fm.data).toMatchObject({ title: 'Hello', status: 'active' });
+      expect(fm.body).toBe('Body\n');
+    });
+
+    it('creates a well-formed --- block when the note has an empty frontmatter block', () => {
+      const text = '---\n\n---\nBody\n';
+      expect(parseFrontmatter(text)).toMatchObject({ data: {}, body: 'Body\n' });
+      const out = applyPropertyEdit(text, 'title', 'New');
+      const fm = parseFrontmatter(out);
+      expect(fm.data).toEqual({ title: 'New' });
+      expect(fm.body).toBe('Body\n');
+      expect(out.startsWith('---\n')).toBe(true);
+    });
+
+    it('creates a well-formed --- block when the note has NO frontmatter yet', () => {
+      const text = '# Just a note\n\nSome body text.\n';
+      expect(parseFrontmatter(text).raw).toBeNull();
+      const out = applyPropertyEdit(text, 'title', 'First Property');
+      const fm = parseFrontmatter(out);
+      expect(fm.data).toEqual({ title: 'First Property' });
+      // Body untouched, byte-for-byte, and the new block sits above it.
+      expect(fm.body).toBe(text);
+      expect(out).toBe(`---\ntitle: First Property\n---\n${text}`);
+    });
+
+    it('removes a key entirely, leaving other keys and the body untouched', () => {
+      const text = '---\ntitle: Hello\nstatus: draft\n---\nBody\n';
+      const out = removeProperty(text, 'status');
+      const fm = parseFrontmatter(out);
+      expect(fm.data).toEqual({ title: 'Hello' });
+      expect(fm.body).toBe('Body\n');
+    });
+
+    it('is a no-op when removing a key that is not present', () => {
+      const text = '---\ntitle: Hello\n---\nBody\n';
+      expect(removeProperty(text, 'missing')).toBe(text);
+    });
+  });
+
+  describe('addArrayItem / removeArrayItem', () => {
+    it('appends an item to an existing array', () => {
+      const text = '---\ntags: [a, b]\n---\nBody\n';
+      const out = addArrayItem(text, 'tags', 'c');
+      expect(parseFrontmatter(out).data.tags).toEqual(['a', 'b', 'c']);
+    });
+
+    it('creates the array when the key is absent', () => {
+      const text = '---\ntitle: Hello\n---\nBody\n';
+      const out = addArrayItem(text, 'tags', 'first');
+      expect(parseFrontmatter(out).data.tags).toEqual(['first']);
+    });
+
+    it('removes only the first matching occurrence, preserving duplicates and order', () => {
+      const text = '---\ntags: [a, b, a]\n---\nBody\n';
+      const out = removeArrayItem(text, 'tags', 'a');
+      expect(parseFrontmatter(out).data.tags).toEqual(['b', 'a']);
+    });
+
+    it('is a no-op when the item is not present', () => {
+      const text = '---\ntags: [a, b]\n---\nBody\n';
+      expect(removeArrayItem(text, 'tags', 'zzz')).toBe(text);
+    });
+
+    it('preserves the body byte-for-byte across array edits', () => {
+      const text = '---\ntags: [a]\n---\n# Heading\n\nParagraph text.\n';
+      const out = removeArrayItem(addArrayItem(text, 'tags', 'b'), 'tags', 'a');
+      const fm = parseFrontmatter(out);
+      expect(fm.data.tags).toEqual(['b']);
+      expect(fm.body).toBe('# Heading\n\nParagraph text.\n');
+    });
   });
 });

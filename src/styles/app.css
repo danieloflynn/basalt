@@ -2420,3 +2420,252 @@ html.is-electron .shell[data-desktop] {
 .shell[data-desktop] .sidebar-right .rightbar__mention .hit__excerpt {
   margin-top: 0;
 }
+
+/* ---------- WP10: editable properties (desktop reader) ---------- */
+
+/* Three columns now (key | value | per-row delete), overriding the plain
+   2-column rule above by specificity — that rule still serves as the base
+   layout, this just makes room for the delete affordance. */
+.shell[data-desktop] .props-expanded {
+  grid-template-columns: minmax(90px, auto) 1fr auto;
+}
+
+/* Each row is a `display:contents` wrapper: its children (key, value, delete
+   button) land directly in the parent grid exactly as before, but grouping
+   them lets the delete button react to a hover anywhere on the row. */
+.shell[data-desktop] .props-expanded__row {
+  display: contents;
+}
+
+.shell[data-desktop] .props-expanded__delete {
+  opacity: 0;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  color: var(--text-faint);
+  border-radius: var(--r-sm);
+  transition:
+    opacity var(--dur) var(--ease),
+    color var(--dur) var(--ease),
+    background var(--dur) var(--ease);
+}
+
+.shell[data-desktop] .props-expanded__row:hover .props-expanded__delete,
+.shell[data-desktop] .props-expanded__delete:focus-visible {
+  opacity: 1;
+}
+
+.shell[data-desktop] .props-expanded__delete:hover {
+  color: var(--danger);
+  background: var(--surface);
+}
+
+/* Scalar value shown as a borderless button so the table doesn't look
+   "form-y" at rest — only a hover hints that it's editable, like Obsidian. */
+.shell[data-desktop] .props-expanded__value--edit {
+  font: inherit;
+  text-align: left;
+  color: var(--text-muted);
+  border-radius: var(--r-sm);
+  padding: 1px 5px;
+  margin: -1px -5px;
+  transition: background var(--dur) var(--ease);
+}
+
+.shell[data-desktop] .props-expanded__value--edit:hover {
+  background: var(--surface);
+}
+
+.shell[data-desktop] .props-expanded__value-input,
+.shell[data-desktop] .props-expanded__add-key,
+.shell[data-desktop] .props-expanded__add-value {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  padding: 1px 5px;
+  min-width: 0;
+}
+
+.shell[data-desktop] .props-expanded__value-input {
+  width: 100%;
+}
+
+/* Tag pill remove control: small, faint, brightens on hover/focus — reuses
+   the existing --link tag color rather than introducing a new one. */
+.shell[data-desktop] .props-expanded__tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.shell[data-desktop] .props-expanded__tag-remove {
+  display: grid;
+  place-items: center;
+  width: 13px;
+  height: 13px;
+  color: var(--link);
+  opacity: 0.55;
+  border-radius: 999px;
+  transition: opacity var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+
+.shell[data-desktop] .props-expanded__tag-remove:hover,
+.shell[data-desktop] .props-expanded__tag-remove:focus-visible {
+  opacity: 1;
+  background: color-mix(in srgb, var(--link) 20%, transparent);
+}
+
+.shell[data-desktop] .props-expanded__tag-input {
+  width: 56px;
+  font: inherit;
+  font-size: 0.82em;
+  color: var(--text-muted);
+  background: none;
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  padding: 0.05em 0.6em;
+}
+
+.shell[data-desktop] .props-expanded__tag-input:focus {
+  border-style: solid;
+  border-color: var(--border-strong);
+  outline: none;
+}
+
+/* "Add property" — faint affordance at the table's foot, Obsidian-style;
+   small footprint so it reads as a hint, not a form. */
+.shell[data-desktop] .props-expanded__add {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  padding: 3px 6px 3px 2px;
+  color: var(--text-faint);
+  font-size: var(--text-sm);
+  border-radius: var(--r-sm);
+  transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+
+.shell[data-desktop] .props-expanded__add:hover {
+  color: var(--text-muted);
+  background: var(--surface);
+}
+
+.shell[data-desktop] .props-expanded__add-row {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.shell[data-desktop] .props-expanded__add-key {
+  width: 110px;
+  flex-shrink: 0;
+}
+
+.shell[data-desktop] .props-expanded__add-value {
+  flex: 1;
+  min-width: 0;
+}
+
+.shell[data-desktop] .props-expanded__add-confirm,
+.shell[data-desktop] .props-expanded__add-cancel {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  color: var(--text-faint);
+  border-radius: var(--r-sm);
+  transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+
+.shell[data-desktop] .props-expanded__add-confirm:hover {
+  color: var(--ember);
+  background: var(--surface);
+}
+
+.shell[data-desktop] .props-expanded__add-cancel:hover {
+  color: var(--text-muted);
+  background: var(--surface);
+}
+
+/* ---------- WP9: right-sidebar tabs + unlinked mentions ---------- */
+/* Everything below is scoped under [data-desktop] .sidebar-right so the
+   mobile backlinks drawer (same component, JSX-branched) is never touched. */
+
+/* Icon tab row (Obsidian Mac's right-sidebar tab group): Backlinks / Outline. */
+.shell[data-desktop] .sidebar-right .rightbar__tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.shell[data-desktop] .sidebar-right .rightbar__tab {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r-sm);
+  color: var(--text-faint);
+  transition:
+    background var(--dur) var(--ease),
+    color var(--dur) var(--ease);
+}
+
+.shell[data-desktop] .sidebar-right .rightbar__tab:hover {
+  background: var(--surface);
+  color: var(--text-muted);
+}
+
+.shell[data-desktop] .sidebar-right .rightbar__tab[aria-selected='true'] {
+  color: var(--text);
+  background: var(--surface-press);
+  box-shadow: inset 0 -2px 0 var(--text);
+}
+
+/* Outline tab: heading list, indented by level (mirrors NoteInfoSheet's
+   outline sheet — same base/step indent, just no fixed "H1"/"H2" gutter). */
+.shell[data-desktop] .sidebar-right .rightbar__outline {
+  padding: 4px 0;
+}
+
+.shell[data-desktop] .sidebar-right .rightbar__outline-item {
+  display: block;
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 12px;
+  text-align: left;
+  font-family: inherit;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shell[data-desktop] .sidebar-right .rightbar__outline-item:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+/* Unlinked mentions: same collapsible-group/boxed-snippet look as linked
+   mentions — .rightbar__group / .rightbar__group-head / .rightbar__group-title
+   / .rightbar__mention are reused verbatim for each source row, so only the
+   section's own separator + collapsed-by-default header need new rules. */
+.shell[data-desktop] .sidebar-right .rightbar__unlinked {
+  margin-top: 6px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
