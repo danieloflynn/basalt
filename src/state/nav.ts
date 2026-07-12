@@ -95,6 +95,16 @@ interface NavState {
   switchTab: (index: number) => void;
   /** Pin/unpin a tab (desktop tab strip). */
   togglePin: (index: number) => void;
+
+  /**
+   * Obsidian's "Open to the right": a second reading pane docked between the
+   * main pane and the backlinks column, showing ONE note. Desktop-only — no
+   * mobile UI sets it. Links inside it navigate the MAIN pane, so the split
+   * stays put as reference material.
+   */
+  splitPath: string | null;
+  openToTheRight: (path: string) => void;
+  closeSplit: () => void;
 }
 
 export const useNav = create<NavState>((set, get) => ({
@@ -168,6 +178,7 @@ export const useNav = create<NavState>((set, get) => ({
         });
         return changed ? { ...tab, history } : tab;
       }),
+      splitPath: s.splitPath === from ? to : s.splitPath,
     })),
 
   back: () => {
@@ -227,6 +238,7 @@ export const useNav = create<NavState>((set, get) => ({
       sidebarView: 'files',
       overlay: 'none',
       searchSeed: null,
+      splitPath: null,
     }),
 
   setDesktop: (v) => set({ desktop: v }),
@@ -285,6 +297,10 @@ export const useNav = create<NavState>((set, get) => ({
     set((s) => ({
       tabs: s.tabs.map((t, i) => (i === index ? { ...t, pinned: !t.pinned } : t)),
     })),
+
+  splitPath: null,
+  openToTheRight: (path) => set({ splitPath: path }),
+  closeSplit: () => set({ splitPath: null }),
 }));
 
 export function currentScreen(state: { tabs: Tab[]; active: number }): Screen {

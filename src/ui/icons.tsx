@@ -148,6 +148,13 @@ export const IconPin = (p: P) => (
   </I>
 );
 
+export const IconSplit = (p: P) => (
+  <I {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="3" />
+    <path d="M12 4v16" />
+  </I>
+);
+
 export const IconSync = (p: P) => (
   <I {...p}>
     <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />

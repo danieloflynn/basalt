@@ -12,7 +12,7 @@ import type { TreeNode } from '@/lib/tree';
 import { vaultService } from '@/services';
 import { useNav } from '@/state/nav';
 import { useAnchoredMenu, type AnchorPoint } from '@/ui/hooks/useAnchoredMenu';
-import { IconCopy, IconNotePlus, IconRename, IconTrash } from '@/ui/icons';
+import { IconCopy, IconNotePlus, IconRename, IconSplit, IconTrash } from '@/ui/icons';
 import { Dialog } from './Dialog';
 
 /**
@@ -105,6 +105,21 @@ export function FileActionsSheet({
 
   const rows = (
     <>
+      {/* Desktop-only (the split pane is desktop chrome; mobile sheet unchanged). */}
+      {isNote && desktop && (
+        <button
+          className="sheet__item"
+          onClick={() => {
+            useNav.getState().openToTheRight(node.path);
+            onClose();
+          }}
+        >
+          <span className="row__icon">
+            <IconSplit size={20} />
+          </span>
+          Open to the right
+        </button>
+      )}
       {isFolder && (
         <button
           className="sheet__item"

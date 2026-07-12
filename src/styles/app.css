@@ -1629,9 +1629,11 @@ textarea.inline-title::placeholder {
   /* Column tracks: 0 when a panel is collapsed, its width when the flag is set. */
   --lw: 0px;
   --rw: 0px;
+  /* Split pane ("Open to the right"): collapsed to nothing until data-split. */
+  --split-track: 0px;
 
   display: grid;
-  grid-template-columns: var(--ribbon-w) var(--lw) minmax(0, 1fr) var(--rw);
+  grid-template-columns: var(--ribbon-w) var(--lw) minmax(0, 1fr) var(--split-track) var(--rw);
   grid-template-rows: var(--titlebar-h) minmax(0, 1fr);
 }
 
@@ -1641,6 +1643,10 @@ textarea.inline-title::placeholder {
 
 .shell[data-desktop][data-right] {
   --rw: var(--rightbar-w);
+}
+
+.shell[data-desktop][data-split] {
+  --split-track: minmax(0, 1fr);
 }
 
 /* Titlebar owns the whole first row, above every column. */
@@ -1679,13 +1685,37 @@ textarea.inline-title::placeholder {
 }
 
 .shell[data-desktop] > .sidebar-right {
-  grid-column: 4;
+  grid-column: 5;
 }
 
 .shell[data-desktop] > .screen {
   grid-row: 2;
   grid-column: 3;
   min-width: 0;
+}
+
+/* The split pane ("Open to the right") — its own column beside the main pane. */
+.shell[data-desktop] > .split-pane {
+  grid-row: 2;
+  grid-column: 4;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.split-pane__title {
+  margin: 18px var(--pad-screen) 0;
+  font-family: var(--font-display);
+  font-size: 1.7em;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* The note body already pads itself; just tuck it closer to the title. */
+.split-pane__title + .md {
+  padding-top: 8px;
 }
 
 /* No dimming scrims, no bottom-pill gutter when docked. */

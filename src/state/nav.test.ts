@@ -193,6 +193,21 @@ describe('nav reset', () => {
   });
 });
 
+describe('split pane', () => {
+  beforeEach(() => nav().reset());
+
+  it('openToTheRight sets the pane, renamePath follows it, reset clears it', () => {
+    nav().openToTheRight('a.md');
+    expect(nav().splitPath).toBe('a.md');
+    nav().renamePath('a.md', 'b.md');
+    expect(nav().splitPath).toBe('b.md');
+    nav().renamePath('other.md', 'x.md');
+    expect(nav().splitPath).toBe('b.md');
+    nav().reset();
+    expect(nav().splitPath).toBeNull();
+  });
+});
+
 describe('pinned tabs', () => {
   beforeEach(() => nav().reset());
 

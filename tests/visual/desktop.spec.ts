@@ -424,3 +424,38 @@ test('ctrl-hovering a wikilink floats a page preview of the target note', async 
   await page.waitForTimeout(450);
   await expect(card).toHaveCount(0);
 });
+
+/**
+ * Split pane v1 — Obsidian's "Open to the right": a second reading pane
+ * docked beside the main one. The main pane keeps navigating independently;
+ * links inside the split navigate the MAIN pane (the split is reference
+ * material); the header ✕ closes it.
+ */
+test('"Open to the right" docks a second reading pane beside the note', async ({ page }) => {
+  await onboard(page);
+  await page.locator('.filetree').getByRole('button', { name: 'Welcome', exact: true }).click();
+  await page
+    .locator('.filetree')
+    .getByRole('button', { name: 'Reading List', exact: true })
+    .click({ button: 'right' });
+  await page.getByRole('button', { name: 'Open to the right' }).click();
+
+  const split = page.locator('.split-pane');
+  await expect(split).toBeVisible();
+  await expect(split.locator('.split-pane__title')).toHaveText('Reading List');
+  await expect(split).toContainText('See also');
+  await expect(page.locator('.inline-title')).toHaveValue('Welcome');
+
+  // Main-pane navigation leaves the split alone.
+  await page.locator('.filetree').getByRole('button', { name: 'Old Note', exact: true }).click();
+  await expect(page.locator('.inline-title')).toHaveValue('Old Note');
+  await expect(split.locator('.split-pane__title')).toHaveText('Reading List');
+
+  // A wikilink inside the split navigates the MAIN pane; the split stays put.
+  await split.locator('a.wikilink', { hasText: 'Welcome' }).first().click();
+  await expect(page.locator('.inline-title')).toHaveValue('Welcome');
+  await expect(split.locator('.split-pane__title')).toHaveText('Reading List');
+
+  await page.getByRole('button', { name: 'Close split pane' }).click();
+  await expect(split).toHaveCount(0);
+});

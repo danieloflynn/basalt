@@ -12,6 +12,7 @@ import {
   IconMove,
   IconNote,
   IconRename,
+  IconSplit,
   IconStar,
   IconTrash,
   IconWikilink,
@@ -126,6 +127,12 @@ export function NoteMenu({ path, onClose }: { path: string; onClose: () => void 
 
   const rows = (
     <>
+      {/* Desktop-only (the split pane is desktop chrome; mobile sheet unchanged). */}
+      {desktop &&
+        item(<IconSplit size={19} />, 'Open to the right', () => {
+          onClose();
+          nav.openToTheRight(path);
+        })}
       {item(
         <IconStar size={19} fill={bookmarked ? 'currentColor' : 'none'} />,
         bookmarked ? 'Remove bookmark' : 'Bookmark',

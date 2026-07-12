@@ -30,6 +30,7 @@ import { OverlayHost } from '@/ui/workspace/OverlayHost';
 import { Ribbon } from '@/ui/workspace/Ribbon';
 import { RightSidebar } from '@/ui/workspace/RightSidebar';
 import { Sidebar } from '@/ui/workspace/Sidebar';
+import { SplitPane } from '@/ui/workspace/SplitPane';
 import { StatusBar as DesktopStatusBar } from '@/ui/workspace/StatusBar';
 import { useIsDesktop } from '@/ui/hooks/useIsDesktop';
 import { usePullDown } from '@/ui/hooks/usePullDown';
@@ -174,10 +175,14 @@ export function App() {
       data-desktop={isDesktop || undefined}
       data-left={isDesktop && sidebarOpen ? '' : undefined}
       data-right={isDesktop && rightSidebarOpen ? '' : undefined}
+      data-split={isDesktop && nav.splitPath !== null ? '' : undefined}
     >
       {isDesktop && <Ribbon />}
       {isDesktop && <DesktopChrome />}
       <WorkspaceScreen screen={screen} />
+      {isDesktop && nav.splitPath !== null && (
+        <SplitPane key={nav.splitPath} path={nav.splitPath} />
+      )}
       {isDesktop && <DesktopStatusBar />}
       {isDesktop && <HoverPreviewCard />}
       <div className="banners-layer">
