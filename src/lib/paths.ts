@@ -76,7 +76,45 @@ export function noteTitle(p: string): string {
   return stripExt(basename(p));
 }
 
+/**
+ * Sanitize a user-typed note title into a safe filename stem (no extension).
+ *
+ * Strips a typed `.md`, replaces filesystem-illegal AND wikilink-breaking
+ * characters (`\ / : | # [ ] ^`) with '-', and removes leading dots so a title
+ * like `.draft` or `.` can never become a hidden path (`.draft.md` / `..md`,
+ * which vanish from the tree and silently drop autosaves). Empty / dot-only
+ * results fall back to 'Untitled'. This is the single choke point every note
+ * name flows through (createNote + renameByTitle).
+ */
+export function sanitizeNoteTitle(raw: string): string {
+  const cleaned = raw
+    .replace(/\.md$/i, '')
+    .replace(/[\\/:|#[\]^]/g, '-')
+    .trim()
+    .replace(/^\.+/, '')
+    .trim();
+  if (!cleaned || cleaned === '.' || cleaned === '..') return 'Untitled';
+  return cleaned;
+}
+
 /** True for paths that should be hidden from browsing (.git, .obsidian, .trash …). */
 export function isHiddenPath(p: string): boolean {
   return p.split('/').some((part) => part.startsWith('.'));
+}
+
+export interface Breadcrumb {
+  /** Folder name (ancestor) or note title (leaf), extension already stripped. */
+  label: string;
+  /** True for the final segment — the note itself, not a folder ancestor. */
+  isLeaf: boolean;
+}
+
+/**
+ * Split a vault path into desktop pane-header breadcrumbs: one entry per
+ * folder ancestor, then the note title with its extension stripped. A
+ * root-level note (`Welcome.md`) yields a single leaf segment.
+ */
+export function breadcrumbsFor(p: string): Breadcrumb[] {
+  const parts = stripExt(p).split('/').filter(Boolean);
+  return parts.map((label, i) => ({ label, isLeaf: i === parts.length - 1 }));
 }

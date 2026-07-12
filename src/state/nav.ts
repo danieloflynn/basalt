@@ -3,7 +3,7 @@ import { create } from 'zustand';
 export type Screen =
   | { name: 'empty' }
   | { name: 'note'; path: string; heading?: string }
-  | { name: 'edit'; path: string }
+  | { name: 'edit'; path: string; heading?: string }
   | { name: 'artifact'; path: string }
   | { name: 'settings' }
   | { name: 'history'; path?: string }
@@ -18,10 +18,16 @@ export type ViewMode = 'reading' | 'editing';
 /** Workspace overlays (bottom-pill popups); global so gestures can open them. */
 export type Overlay = 'none' | 'quickopen' | 'tabs' | 'palette';
 
-interface Tab {
+export interface Tab {
   /** Visited screens; index points at the current one (enables forward). */
   history: Screen[];
   index: number;
+  /**
+   * Pinned (Obsidian): the tab's content is locked — navigation from it opens
+   * a new tab beside it, back/forward are disabled, and close is refused until
+   * unpinned. Only the desktop tab strip exposes pinning.
+   */
+  pinned?: boolean;
 }
 
 const HOME: Screen = { name: 'empty' };
@@ -32,6 +38,19 @@ interface NavState {
   active: number;
   sidebarOpen: boolean;
   sidebarView: SidebarView;
+
+  /**
+   * Desktop (docked) mode: the viewport is wide enough to dock BOTH sidebars as
+   * persistent columns instead of one-at-a-time overlays. App drives this from a
+   * matchMedia query. When true, opening one panel no longer closes the other
+   * and navigating no longer auto-closes them — the panels stay put like
+   * Obsidian desktop. Defaults false, so on phones every guard below is a no-op.
+   */
+  desktop: boolean;
+  setDesktop: (v: boolean) => void;
+  /** Collapse/expand a docked panel (desktop); the toggles the header uses. */
+  toggleSidebar: () => void;
+  toggleRightSidebar: () => void;
 
   /**
    * Sticky view mode: when 'editing', every note opened via `push` lands in the
@@ -74,6 +93,29 @@ interface NavState {
   newTab: (screen?: Screen) => void;
   closeTab: (index: number) => void;
   switchTab: (index: number) => void;
+  /** Pin/unpin a tab (desktop tab strip). */
+  togglePin: (index: number) => void;
+
+  /**
+   * Obsidian's split pane ("Open to the right"): a second FULL pane — its own
+   * history, back/forward, reading/editing — docked between the main pane and
+   * the backlinks column. Desktop-only: no mobile UI ever sets it, and with
+   * `split` null every focus-routed operation below degrades to exactly the
+   * single-pane behavior.
+   *
+   * Focus routing (Obsidian's "active pane"): push/replace/back/forward act
+   * on the FOCUSED pane. App sets focus from a capturing mousedown, so a
+   * click's action lands in the pane that was clicked, and sidebar/tree
+   * clicks open in whichever pane was last active.
+   */
+  split: Tab | null;
+  focusedPane: 'main' | 'split';
+  setFocusedPane: (pane: 'main' | 'split') => void;
+  openToTheRight: (path: string) => void;
+  closeSplit: () => void;
+  /** Pane-scoped history probes for the two pane headers' arrow states. */
+  canBackIn: (pane: 'main' | 'split') => boolean;
+  canForwardIn: (pane: 'main' | 'split') => boolean;
 }
 
 export const useNav = create<NavState>((set, get) => ({
@@ -81,6 +123,7 @@ export const useNav = create<NavState>((set, get) => ({
   active: 0,
   sidebarOpen: false,
   sidebarView: 'files',
+  desktop: false,
 
   viewMode: 'reading',
   setViewMode: (mode) => set({ viewMode: mode }),
@@ -91,28 +134,58 @@ export const useNav = create<NavState>((set, get) => ({
       // (new-note flows) are untouched, so fresh notes always open to write.
       const eff: Screen =
         s.viewMode === 'editing' && screen.name === 'note'
-          ? { name: 'edit', path: screen.path }
+          ? { name: 'edit', path: screen.path, heading: screen.heading }
           : screen;
+      // Focused split pane: navigation lands there (Obsidian's active pane).
+      if (s.focusedPane === 'split' && s.split) {
+        const t = s.split;
+        const history = [...t.history.slice(0, t.index + 1), eff];
+        return { split: { ...t, history, index: history.length - 1 } };
+      }
+      const tab = s.tabs[s.active];
+      const cur = tab.history[tab.index];
+      // A pinned tab's content is locked: navigating to a DIFFERENT file opens
+      // a new tab beside it (Obsidian). Same-file pushes (outline heading
+      // jumps, reader⇄editor reroutes) still land in the pinned tab.
+      const sameFile = 'path' in eff && 'path' in cur && eff.path === cur.path;
+      if (tab.pinned && !sameFile) {
+        const tabs = [...s.tabs];
+        tabs.splice(s.active + 1, 0, { history: [HOME, eff], index: 1 });
+        return {
+          sidebarOpen: s.desktop ? s.sidebarOpen : false,
+          rightSidebarOpen: s.desktop ? s.rightSidebarOpen : false,
+          tabs,
+          active: s.active + 1,
+        };
+      }
       return {
-        sidebarOpen: false,
-        rightSidebarOpen: false,
-        tabs: s.tabs.map((tab, i) => {
-          if (i !== s.active) return tab;
-          const history = [...tab.history.slice(0, tab.index + 1), eff];
-          return { history, index: history.length - 1 };
+        // Docked desktop panels persist across navigation; overlays close.
+        sidebarOpen: s.desktop ? s.sidebarOpen : false,
+        rightSidebarOpen: s.desktop ? s.rightSidebarOpen : false,
+        tabs: s.tabs.map((t, i) => {
+          if (i !== s.active) return t;
+          const history = [...t.history.slice(0, t.index + 1), eff];
+          return { ...t, history, index: history.length - 1 };
         }),
       };
     }),
 
   replace: (screen) =>
-    set((s) => ({
-      tabs: s.tabs.map((tab, i) => {
-        if (i !== s.active) return tab;
-        const history = [...tab.history];
-        history[tab.index] = screen;
-        return { ...tab, history };
-      }),
-    })),
+    set((s) => {
+      if (s.focusedPane === 'split' && s.split) {
+        const history = [...s.split.history];
+        history[s.split.index] = screen;
+        return { split: { ...s.split, history } };
+      }
+      return {
+        tabs: s.tabs.map((tab, i) => {
+          if (i !== s.active) return tab;
+          const history = [...tab.history];
+          history[tab.index] = screen;
+          return { ...tab, history };
+        }),
+      };
+    }),
 
   renamePath: (from, to) =>
     set((s) => ({
@@ -129,24 +202,41 @@ export const useNav = create<NavState>((set, get) => ({
         });
         return changed ? { ...tab, history } : tab;
       }),
+      split: s.split
+        ? {
+            ...s.split,
+            history: s.split.history.map((screen) =>
+              'path' in screen && screen.path === from ? { ...screen, path: to } : screen,
+            ),
+          }
+        : null,
     })),
 
   back: () => {
-    const { tabs, active, sidebarOpen, rightSidebarOpen, overlay } = get();
+    const { tabs, active, sidebarOpen, rightSidebarOpen, overlay, desktop } = get();
     if (overlay !== 'none') {
       set({ overlay: 'none' });
       return true;
     }
-    if (rightSidebarOpen) {
+    // Draining the drawers belongs to the phone back button; desktop's docked
+    // panels stay put while history navigates (Obsidian).
+    if (!desktop && rightSidebarOpen) {
       set({ rightSidebarOpen: false });
       return true;
     }
-    if (sidebarOpen) {
+    if (!desktop && sidebarOpen) {
       set({ sidebarOpen: false });
       return true;
     }
+    const { focusedPane, split } = get();
+    if (focusedPane === 'split' && split) {
+      if (split.index === 0) return false;
+      set({ split: { ...split, index: split.index - 1 } });
+      return true;
+    }
     const tab = tabs[active];
-    if (tab.index === 0) return false;
+    // Pinned tabs don't navigate — not even through their own history.
+    if (tab.pinned || tab.index === 0) return false;
     set({
       tabs: tabs.map((t, i) => (i === active ? { ...t, index: t.index - 1 } : t)),
     });
@@ -154,41 +244,69 @@ export const useNav = create<NavState>((set, get) => ({
   },
 
   forward: () => {
-    const { tabs, active } = get();
+    const { tabs, active, focusedPane, split } = get();
+    if (focusedPane === 'split' && split) {
+      if (split.index >= split.history.length - 1) return false;
+      set({ split: { ...split, index: split.index + 1 } });
+      return true;
+    }
     const tab = tabs[active];
-    if (tab.index >= tab.history.length - 1) return false;
+    if (tab.pinned || tab.index >= tab.history.length - 1) return false;
     set({
       tabs: tabs.map((t, i) => (i === active ? { ...t, index: t.index + 1 } : t)),
     });
     return true;
   },
 
-  canBack: () => {
-    const { tabs, active } = get();
-    return tabs[active].index > 0;
+  canBack: () => get().canBackIn(get().focusedPane),
+
+  canForward: () => get().canForwardIn(get().focusedPane),
+
+  canBackIn: (pane) => {
+    const { tabs, active, split } = get();
+    if (pane === 'split') return !!split && split.index > 0;
+    const tab = tabs[active];
+    return !tab.pinned && tab.index > 0;
   },
 
-  canForward: () => {
-    const { tabs, active } = get();
+  canForwardIn: (pane) => {
+    const { tabs, active, split } = get();
+    if (pane === 'split') return !!split && split.index < split.history.length - 1;
     const tab = tabs[active];
-    return tab.index < tab.history.length - 1;
+    return !tab.pinned && tab.index < tab.history.length - 1;
   },
 
   reset: () =>
-    set({
+    // Clear per-vault UI state on a vault switch. searchSeed must be cleared or
+    // the previous vault's seeded tag/search query resurfaces in the new vault.
+    // (viewMode is a global pref, deliberately NOT reset here.) Desktop keeps
+    // its docked panels — only the phone drawers close.
+    set((s) => ({
       tabs: [newTabState()],
       active: 0,
-      sidebarOpen: false,
-      rightSidebarOpen: false,
+      sidebarOpen: s.desktop,
+      rightSidebarOpen: s.desktop,
       sidebarView: 'files',
       overlay: 'none',
-    }),
+      searchSeed: null,
+      split: null,
+      focusedPane: 'main',
+    })),
+
+  setDesktop: (v) => set({ desktop: v }),
+  toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
+  toggleRightSidebar: () => set((s) => ({ rightSidebarOpen: !s.rightSidebarOpen })),
 
   openSidebar: (view) =>
-    set((s) => ({ sidebarOpen: true, rightSidebarOpen: false, sidebarView: view ?? s.sidebarView })),
+    set((s) => ({
+      sidebarOpen: true,
+      rightSidebarOpen: s.desktop ? s.rightSidebarOpen : false,
+      sidebarView: view ?? s.sidebarView,
+    })),
   closeSidebar: () => set({ sidebarOpen: false }),
   rightSidebarOpen: false,
-  openRightSidebar: () => set({ rightSidebarOpen: true, sidebarOpen: false }),
+  openRightSidebar: () =>
+    set((s) => ({ rightSidebarOpen: true, sidebarOpen: s.desktop ? s.sidebarOpen : false })),
   closeRightSidebar: () => set({ rightSidebarOpen: false }),
   setSidebarView: (view) => set({ sidebarView: view, searchSeed: null }),
   searchSeed: null,
@@ -208,11 +326,15 @@ export const useNav = create<NavState>((set, get) => ({
         screen ? { history: [HOME, screen], index: 1 } : newTabState(),
       ],
       active: s.tabs.length,
-      sidebarOpen: false,
+      sidebarOpen: s.desktop ? s.sidebarOpen : false,
+      // A new tab lives in the main strip — focus follows it.
+      focusedPane: 'main',
     })),
 
   closeTab: (index) =>
     set((s) => {
+      // A pinned tab refuses to close (Obsidian) — unpin first.
+      if (s.tabs[index]?.pinned) return s;
       if (s.tabs.length <= 1) return { tabs: [newTabState()], active: 0 };
       const tabs = s.tabs.filter((_, i) => i !== index);
       const active = index < s.active ? s.active - 1 : s.active;
@@ -222,13 +344,55 @@ export const useNav = create<NavState>((set, get) => ({
   switchTab: (index) =>
     set((s) => ({
       active: Math.max(0, Math.min(index, s.tabs.length - 1)),
-      sidebarOpen: false,
+      sidebarOpen: s.desktop ? s.sidebarOpen : false,
+      focusedPane: 'main',
     })),
+
+  togglePin: (index) =>
+    set((s) => ({
+      tabs: s.tabs.map((t, i) => (i === index ? { ...t, pinned: !t.pinned } : t)),
+    })),
+
+  split: null,
+  focusedPane: 'main',
+  setFocusedPane: (pane) => set({ focusedPane: pane }),
+  openToTheRight: (path) =>
+    // A fresh one-entry history; the new pane takes focus (Obsidian). The
+    // global view mode applies, same as push's reader→editor reroute.
+    set((s) => ({
+      split: {
+        history: [
+          s.viewMode === 'editing'
+            ? { name: 'edit' as const, path }
+            : { name: 'note' as const, path },
+        ],
+        index: 0,
+      },
+      focusedPane: 'split',
+    })),
+  closeSplit: () => set({ split: null, focusedPane: 'main' }),
 }));
 
 export function currentScreen(state: { tabs: Tab[]; active: number }): Screen {
   const tab = state.tabs[state.active];
   return tab.history[tab.index];
+}
+
+/**
+ * The FOCUSED pane's screen — what the backlinks panel and status bar track
+ * (Obsidian: the right sidebar follows the active pane). Identical to
+ * currentScreen whenever no split is open, so mobile behavior is unchanged.
+ */
+export function focusedScreen(state: {
+  tabs: Tab[];
+  active: number;
+  split: Tab | null;
+  focusedPane: 'main' | 'split';
+}): Screen {
+  if (state.focusedPane === 'split' && state.split) {
+    return state.split.history[state.split.index];
+  }
+  return currentScreen(state);
 }
 
 /** Title-ish description of a tab (its current screen) for the tab switcher. */

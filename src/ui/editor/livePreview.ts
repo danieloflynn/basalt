@@ -8,6 +8,7 @@ import {
   type ViewUpdate,
   WidgetType,
 } from '@codemirror/view';
+import { sortToggledTask } from '@/lib/tasks';
 import { wikilinkDisplayText } from '@/lib/wikilinks';
 
 /**
@@ -15,6 +16,15 @@ import { wikilinkDisplayText } from '@/lib/wikilinks';
  * cursor is on (Obsidian's behaviour), renders checkboxes as tappable boxes,
  * and collapses [[wikilinks]] to their display text.
  */
+
+export interface LivePreviewOptions {
+  /**
+   * Read the "checking a task sinks it below its siblings" setting at tap
+   * time. Injected by the host screen so this module stays free of the
+   * services import graph (and headlessly testable).
+   */
+  sortOnToggle?: () => boolean;
+}
 
 /** Node names whose text is pure syntax and should be hidden when inactive. */
 const HIDDEN_MARKS = new Set([
@@ -27,13 +37,32 @@ const HIDDEN_MARKS = new Set([
   'URL',
 ]);
 
-const WIKILINK = /(!)?\[\[([^\[\]]+?)\]\]/g;
+// Newlines excluded: Obsidian never treats a multi-line [[…]] as a link, and a
+// pseudo-link that spanned lines used to collapse the line being edited.
+const WIKILINK = /(!)?\[\[([^\[\]\n]+?)\]\]/g;
 const HIGHLIGHT = /==([^=\n][^\n]*?)==/g;
+
+/**
+ * Nodes whose interior is verbatim (or otherwise not markdown): every REGEX pass
+ * must skip them, or a `# comment` inside a shell fence renders as a giant
+ * heading and YAML `- foo` inside frontmatter grows bullet dots + hanging
+ * indent. (`Math*` are listed defensively for when a math extension is added.)
+ */
+const SKIP_NODES = new Set([
+  'FencedCode',
+  'CodeBlock',
+  'InlineCode',
+  'Frontmatter',
+  'Math',
+  'InlineMath',
+  'BlockMath',
+]);
 
 class CheckboxWidget extends WidgetType {
   constructor(
     private checked: boolean,
     private pos: number,
+    private sortOnToggle?: () => boolean,
   ) {
     super();
   }
@@ -52,7 +81,27 @@ class CheckboxWidget extends WidgetType {
     box.onclick = (e) => {
       e.preventDefault();
       const mark = this.checked ? ' ' : 'x';
-      view.dispatch({ changes: { from: this.pos + 1, to: this.pos + 2, insert: mark } });
+      const toggle = { from: this.pos + 1, to: this.pos + 2, insert: mark };
+      if (this.sortOnToggle?.()) {
+        // Sort against the would-be text so the tap is ONE transaction (a
+        // single undo step). The toggle is a same-length single-line edit, so
+        // the region's line offsets are identical in the current doc.
+        const doc = view.state.doc;
+        const text = doc.toString();
+        const toggled = text.slice(0, toggle.from) + mark + text.slice(toggle.to);
+        const region = sortToggledTask(toggled, doc.lineAt(this.pos).number);
+        if (region) {
+          view.dispatch({
+            changes: {
+              from: doc.line(region.startLine).from,
+              to: doc.line(region.endLine).to,
+              insert: region.lines.join('\n'),
+            },
+          });
+          return;
+        }
+      }
+      view.dispatch({ changes: toggle });
     };
     return box;
   }
@@ -101,7 +150,7 @@ class LinkTextWidget extends WidgetType {
   }
 }
 
-function buildDecorations(view: EditorView): DecorationSet {
+export function buildDecorations(view: EditorView, options: LivePreviewOptions = {}): DecorationSet {
   const decorations: Range<Decoration>[] = [];
   const { state } = view;
   const cursorLine = state.doc.lineAt(state.selection.main.head).number;
@@ -114,9 +163,27 @@ function buildDecorations(view: EditorView): DecorationSet {
   }
   activeLines.add(cursorLine);
 
+  const tree = syntaxTree(state);
+
   for (const { from, to } of view.visibleRanges) {
-    // 1. Syntax-tree marks (headings, emphasis, code, quotes).
-    syntaxTree(state).iterate({
+    // Verbatim/non-markdown ranges (code, frontmatter, math) that EVERY regex
+    // pass below must not decorate. Computed from the syntax tree per range.
+    const skip: { from: number; to: number }[] = [];
+    tree.iterate({
+      from,
+      to,
+      enter(node) {
+        if (SKIP_NODES.has(node.name)) skip.push({ from: node.from, to: node.to });
+      },
+    });
+    const inSkip = (pos: number): boolean => {
+      for (const r of skip) if (pos >= r.from && pos < r.to) return true;
+      return false;
+    };
+
+    // 1. Syntax-tree marks (headings, emphasis, code, quotes). Already tree-driven
+    //    so it never fires inside verbatim code (that content isn't parsed).
+    tree.iterate({
       from,
       to,
       enter(node) {
@@ -133,11 +200,13 @@ function buildDecorations(view: EditorView): DecorationSet {
       },
     });
 
-    // 2. Regex-driven: wikilinks and highlights on inactive lines.
+    // 2. Regex-driven: wikilinks and highlights on inactive lines, gated by the
+    //    syntax tree so code/frontmatter/math are left verbatim.
     const text = state.sliceDoc(from, to);
 
     for (const m of text.matchAll(WIKILINK)) {
       const start = from + m.index;
+      if (inSkip(start)) continue;
       const line = state.doc.lineAt(start).number;
       if (activeLines.has(line)) continue;
       const inner = m[2];
@@ -159,6 +228,7 @@ function buildDecorations(view: EditorView): DecorationSet {
 
     for (const m of text.matchAll(HIGHLIGHT)) {
       const start = from + m.index;
+      if (inSkip(start)) continue;
       const line = state.doc.lineAt(start).number;
       if (activeLines.has(line)) continue;
       decorations.push(Decoration.replace({}).range(start, start + 2));
@@ -174,37 +244,42 @@ function buildDecorations(view: EditorView): DecorationSet {
     //    line class here in live mode; source mode leans on the highlight style).
     for (const m of text.matchAll(/^(#{1,6})[ \t]/gm)) {
       const lineStart = from + m.index;
+      if (inSkip(lineStart)) continue; // e.g. `# comment` inside a fenced code block
       const line = state.doc.lineAt(lineStart);
       if (line.from !== lineStart) continue; // partial match at a chunk edge
       decorations.push(Decoration.line({ class: `cm-lp-heading cm-lp-h${m[1].length}` }).range(lineStart));
     }
 
     // 4. List lines: bullets → dot, tasks → a single checkbox (marker hidden),
-    //    ordered markers stay (dimmed by the highlight). Every list line gets a
+    //    ordered markers stay (dimmed by the highlight). Non-tab list lines get a
     //    hanging indent so wrapped text aligns past the marker.
-    for (const m of text.matchAll(/^([ \t]*)([-*+]|\d+[.)])([ \t]+)(\[[ xX]\][ \t])?/gm)) {
+    //    The task group accepts `- [ ]` at end-of-line (no trailing space).
+    for (const m of text.matchAll(/^([ \t]*)([-*+]|\d+[.)])([ \t]+)(\[[ xX]\](?:[ \t]|$))?/gm)) {
       const [prefix, indent, marker, gap, task] = m;
       const lineStart = from + m.index;
+      if (inSkip(lineStart)) continue; // e.g. YAML `- foo` inside frontmatter
       const line = state.doc.lineAt(lineStart);
       if (line.from !== lineStart) continue;
       const markerStart = lineStart + indent.length;
       const contentEnd = lineStart + prefix.length; // where the item text begins
-      // ch is exact in the mono font, so the wrapped-line indent lands under the text.
-      decorations.push(
-        Decoration.line({
-          class: 'cm-lp-list',
-          attributes: { style: `padding-left:calc(2px + ${prefix.length}ch);text-indent:-${prefix.length}ch` },
-        }).range(lineStart),
-      );
+      // ch is exact in the mono font ONLY for space indents; a tab is one char
+      // but renders wide, so the hanging indent would over-hang. Skip it there.
+      if (!indent.includes('\t')) {
+        decorations.push(
+          Decoration.line({
+            class: 'cm-lp-list',
+            attributes: { style: `padding-left:calc(2px + ${prefix.length}ch);text-indent:-${prefix.length}ch` },
+          }).range(lineStart),
+        );
+      }
       if (activeLines.has(line.number)) continue;
       if (task) {
         const boxStart = markerStart + marker.length + gap.length;
         const checked = task[1] !== ' ';
         decorations.push(
-          Decoration.replace({ widget: new CheckboxWidget(checked, boxStart) }).range(
-            markerStart,
-            contentEnd,
-          ),
+          Decoration.replace({
+            widget: new CheckboxWidget(checked, boxStart, options.sortOnToggle),
+          }).range(markerStart, contentEnd),
         );
         if (checked && contentEnd < line.to) {
           decorations.push(Decoration.mark({ class: 'lp-done' }).range(contentEnd, line.to));
@@ -223,19 +298,19 @@ function buildDecorations(view: EditorView): DecorationSet {
   );
 }
 
-export function livePreview(): Extension {
+export function livePreview(options: LivePreviewOptions = {}): Extension {
   return [
     ViewPlugin.fromClass(
       class {
         decorations: DecorationSet;
 
         constructor(view: EditorView) {
-          this.decorations = buildDecorations(view);
+          this.decorations = buildDecorations(view, options);
         }
 
         update(u: ViewUpdate) {
           if (u.docChanged || u.selectionSet || u.viewportChanged) {
-            this.decorations = buildDecorations(u.view);
+            this.decorations = buildDecorations(u.view, options);
           }
         }
       },

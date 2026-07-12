@@ -36,9 +36,10 @@ export const IconSearch = (p: P) => (
 );
 
 export const IconSettings = (p: P) => (
+  // A real cog — teeth around the rim and a hollow hub — not a sun of spokes.
   <I {...p}>
+    <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2Z" />
     <circle cx="12" cy="12" r="3" />
-    <path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1" />
   </I>
 );
 
@@ -137,6 +138,20 @@ export const IconCheck = (p: P) => (
 export const IconX = (p: P) => (
   <I {...p}>
     <path d="M18 6 6 18M6 6l12 12" />
+  </I>
+);
+
+export const IconPin = (p: P) => (
+  <I {...p}>
+    <path d="M12 17v5" />
+    <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z" />
+  </I>
+);
+
+export const IconSplit = (p: P) => (
+  <I {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="3" />
+    <path d="M12 4v16" />
   </I>
 );
 
@@ -268,6 +283,13 @@ export const IconGraph = (p: P) => (
   </I>
 );
 
+export const IconWand = (p: P) => (
+  // A magic wand with a sparkle — the graph timelapse trigger.
+  <I {...p}>
+    <path d="M15 4V2M15 16v-2M8 9h2M20 9h2M17.8 11.8 19 13M17.8 6.2 19 5M3 21l9-9M12.2 6.2 11 5" />
+  </I>
+);
+
 export const IconCommand = (p: P) => (
   <I {...p}>
     <path d="M9 9V5.5a2.5 2.5 0 1 0-2.5 2.5H9Zm0 0v6m0-6h6M9 15H5.5A2.5 2.5 0 1 0 8 17.5V15Zm6 0v3.5a2.5 2.5 0 1 0 2.5-2.5H15Zm0 0V9m0 6H9m6-6h3.5A2.5 2.5 0 1 0 16 6.5V9Z" />
@@ -371,5 +393,25 @@ export const IconEmbed = (p: P) => (
 export const IconHash = (p: P) => (
   <I {...p}>
     <path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18" />
+  </I>
+);
+
+// ---- Desktop file-explorer header icons (WP8) ----
+
+export const IconSort = (p: P) => (
+  // Up/down arrow pair — sort-order trigger (Obsidian file-explorer parity).
+  <I {...p}>
+    <path d="M7 4v16" />
+    <path d="m3 16 4 4 4-4" />
+    <path d="M17 20V4" />
+    <path d="m21 8-4-4-4 4" />
+  </I>
+);
+
+export const IconChevronsUp = (p: P) => (
+  // Two stacked chevrons pointing up — collapse-all trigger.
+  <I {...p}>
+    <path d="m6 15 6-6 6 6" />
+    <path d="m6 20 6-6 6 6" />
   </I>
 );

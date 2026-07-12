@@ -780,6 +780,9 @@
 .workspace-top__group {
   display: flex;
   align-items: center;
+  /* Centers the glyph when the group IS a single icon button (sidebar toggle,
+     back buttons); a no-op for multi-button groups, which size to content. */
+  justify-content: center;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 999px;
@@ -843,18 +846,38 @@ textarea.inline-title::placeholder {
   color: var(--text-faint);
 }
 
+/* Sits above the drawers (40), their scrims (39), sheets/dialogs (30–32) and
+   the vault overlays (45–50) so a sync failure is always visible and reachable.
+   The layer itself is pointer-transparent — only the banner strip takes taps —
+   so a dismissed/failed sync never leaves an invisible tap-blocker behind. */
 .banners-layer {
   position: fixed;
   top: calc(var(--safe-top) + 54px);
   left: 0;
   right: 0;
-  z-index: 25;
+  z-index: 55;
   pointer-events: none;
 }
 
 .banners-layer .banner {
   pointer-events: auto;
   box-shadow: var(--shadow-raised);
+}
+
+/* Compact dismiss control on a banner (e.g. the sync-error notice). */
+.banner__dismiss {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  margin: -4px -4px -4px 0;
+  border-radius: var(--r-sm);
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.banner__dismiss:active {
+  background: var(--surface-press);
 }
 
 /* ---------- Bottom pill ---------- */
@@ -940,8 +963,8 @@ textarea.inline-title::placeholder {
  */
 .sidebar {
   position: fixed;
+  /* Full-width drawer: covers the workspace edge to edge when open. */
   inset: 0;
-  right: 52px;
   z-index: 40;
   display: flex;
   flex-direction: column;
@@ -976,8 +999,79 @@ textarea.inline-title::placeholder {
 
 /* Mid-drag the finger owns the position — no easing fighting it. */
 [data-drawer-drag] .sidebar,
-[data-drawer-drag] .scrim--sidebar {
+[data-drawer-drag] .scrim--sidebar,
+[data-drawer-drag] .sidebar-right,
+[data-drawer-drag] .scrim--rightbar {
   transition: none !important;
+}
+
+/* ---------- Right sidebar (backlinks) — mirror of .sidebar ---------- */
+
+.sidebar-right {
+  position: fixed;
+  /* Full-width drawer: covers the workspace edge to edge when open. */
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+  padding-top: var(--safe-top);
+  transform: translateX(102%);
+  visibility: hidden;
+  transition:
+    transform 200ms var(--ease),
+    visibility 0s linear 200ms;
+}
+
+.sidebar-right[data-open] {
+  transform: none;
+  visibility: visible;
+  transition: transform 200ms var(--ease);
+}
+
+.scrim--rightbar {
+  z-index: 39;
+  animation: none;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms var(--ease);
+}
+
+.scrim--rightbar[data-open] {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Rows keep their own 12px inset — head/section share it so text lines up. */
+.rightbar__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 14px 12px 8px;
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: 580;
+}
+
+.rightbar__count {
+  font-size: var(--text-xs);
+  font-weight: 550;
+  color: var(--text-faint);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.rightbar__section {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  padding: 8px 12px 4px;
 }
 
 .sidebar__content {
@@ -1053,7 +1147,6 @@ textarea.inline-title::placeholder {
   align-items: center;
   gap: 6px;
   padding: 8px 10px calc(10px + var(--safe-bottom));
-  border-top: 1px solid var(--border);
   background: var(--bg);
 }
 
@@ -1180,9 +1273,10 @@ textarea.inline-title::placeholder {
   background: var(--surface-press);
 }
 
+/* Active note: a full-width rounded-pill fill (no accent stripe). The row
+   already carries --r-lg corners, so the lighter surface reads as a pill. */
 .tree-row--active {
-  background: var(--surface-raised);
-  box-shadow: inset 2px 0 0 var(--ember);
+  background: var(--surface-press);
 }
 
 .tree-row--folder {
@@ -1220,6 +1314,51 @@ textarea.inline-title::placeholder {
   text-transform: uppercase;
 }
 
+/* ---- Drag-and-drop (long-press a note, then move) ---- */
+
+/* Floating copy of the row that follows the finger. */
+.tree-drag-ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 60;
+  max-width: 60vw;
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 8px 14px;
+  border-radius: var(--r-lg);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-raised);
+  font-size: var(--text-md);
+  opacity: 0.95;
+  pointer-events: none; /* elementFromPoint must see through it */
+  will-change: transform;
+}
+
+/* The folder under the finger. */
+.tree-row--drop {
+  background: var(--surface-press);
+  box-shadow: inset 0 0 0 1.5px var(--ember);
+}
+
+/* The row being dragged stays home, dimmed, until the move lands. */
+.tree-row--drag-source {
+  opacity: 0.35;
+}
+
+/* Dropping on the tree itself (not a folder) files the note at the root. */
+.filetree[data-drop-root] {
+  box-shadow: inset 0 0 0 1.5px var(--ember);
+  border-radius: var(--r-lg);
+}
+
+/* Mid-drag, row press styling would read as taps — silence it. */
+[data-tree-drag] .tree-row:active {
+  background: transparent;
+}
+
 /* ---------- Quick open / palette ---------- */
 
 .quickopen {
@@ -1248,6 +1387,17 @@ textarea.inline-title::placeholder {
 .quickopen__results {
   overflow-y: auto;
   margin-top: 6px;
+}
+
+/* Command palette hotkey hint, right-aligned in the row (Obsidian shows the
+   assigned shortcut per command). `.tree-row__name` is flex:1, so this just
+   falls in after it. */
+.palette-hint {
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+  white-space: nowrap;
+  margin-left: 8px;
 }
 
 /* ---------- Diff ---------- */
@@ -1319,4 +1469,1360 @@ textarea.inline-title::placeholder {
 
 .cm-searchMatch {
   background: var(--ember-soft) !important;
+}
+
+/* ---------- Graph settings panel ---------- */
+
+.graph-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 31;
+  display: flex;
+  flex-direction: column;
+  width: min(340px, 88vw);
+  background: var(--surface-raised);
+  border-left: 1px solid var(--border);
+  box-shadow: var(--shadow-raised);
+  animation: graph-panel-in var(--dur) var(--ease);
+}
+
+@keyframes graph-panel-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: none;
+  }
+}
+
+.graph-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: calc(10px + var(--safe-top)) 8px 10px 16px;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-display);
+  font-size: var(--text-md);
+  color: var(--text);
+  flex-shrink: 0;
+}
+
+.graph-panel__scroll {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: calc(24px + var(--safe-bottom));
+}
+
+.graph-panel__section {
+  border-bottom: 1px solid var(--border);
+}
+
+.graph-panel__section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 16px;
+  text-align: left;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.graph-panel__section-head svg {
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+
+.graph-panel__body {
+  padding: 0 16px 14px;
+}
+
+.graph-panel__search {
+  margin-bottom: 6px;
+}
+
+.graph-panel__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  margin-top: 8px;
+  padding: 0 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: 550;
+}
+
+.graph-panel__btn:active {
+  background: var(--surface-press);
+}
+
+.graph-panel__btn .row__icon {
+  color: inherit;
+  opacity: 0.8;
+}
+
+.graph-group-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.graph-group-row .dialog__input {
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+  font-size: var(--text-sm);
+}
+
+.graph-group-row .iconbtn {
+  width: 36px;
+  height: 36px;
+}
+
+.graph-swatch {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid var(--surface-raised);
+  box-shadow: 0 0 0 1px var(--border-strong);
+  flex-shrink: 0;
+}
+
+.graph-slider {
+  padding: 8px 0;
+}
+
+.graph-slider + .graph-slider {
+  border-top: 1px solid var(--border);
+}
+
+/* ============================================================
+   Desktop (docked, three-pane) layout
+   Basalt as a Mac app or a wide browser window. Everything here
+   is gated on [data-desktop] on .shell, which App sets from a
+   (min-width: 960px) matchMedia query. Below that width none of
+   it applies and the phone layout — overlay drawers, bottom pill,
+   swipe gestures — stands exactly as before.
+   ============================================================ */
+
+.shell[data-desktop] {
+  --sidebar-w: 260px;
+  --rightbar-w: 300px;
+  --titlebar-h: 40px;
+  /* The icon ribbon — always visible, even with the sidebar collapsed. */
+  --ribbon-w: 44px;
+  /* Gutter under the macOS traffic lights; 0 in a browser, widened in Electron. */
+  --traffic-inset: 0px;
+  /* Column tracks: 0 when a panel is collapsed, its width when the flag is set. */
+  --lw: 0px;
+  --rw: 0px;
+  /* Split pane ("Open to the right"): collapsed to nothing until data-split. */
+  --split-track: 0px;
+
+  display: grid;
+  grid-template-columns: var(--ribbon-w) var(--lw) minmax(0, 1fr) var(--split-track) var(--rw);
+  grid-template-rows: var(--titlebar-h) minmax(0, 1fr);
+}
+
+.shell[data-desktop][data-left] {
+  --lw: var(--sidebar-w);
+}
+
+.shell[data-desktop][data-right] {
+  --rw: var(--rightbar-w);
+}
+
+.shell[data-desktop][data-split] {
+  --split-track: minmax(0, 1fr);
+}
+
+/* Titlebar owns the whole first row, above every column. */
+.shell[data-desktop] > .desktop-chrome {
+  grid-row: 1;
+  grid-column: 1 / -1;
+}
+
+/* The icon ribbon is its own column, always visible — even collapsed sidebar. */
+.shell[data-desktop] > .ribbon {
+  grid-row: 2;
+  grid-column: 1;
+}
+
+/* Both drawers become real grid columns instead of fixed full-screen overlays.
+   z-index resets too: the mobile drawers float at 40, but a docked column must
+   not stack above desktop chrome like the corner status bar (z 15). */
+.shell[data-desktop] > .sidebar,
+.shell[data-desktop] > .sidebar-right {
+  position: relative;
+  inset: auto;
+  z-index: auto;
+  grid-row: 2;
+  width: auto;
+  min-width: 0;
+  padding-top: 0;
+  transform: none;
+  visibility: visible;
+  /* Clip content while the track collapses to 0 — no horizontal scrollbar. */
+  overflow: hidden;
+  transition: none;
+}
+
+.shell[data-desktop] > .sidebar {
+  grid-column: 2;
+}
+
+.shell[data-desktop] > .sidebar-right {
+  grid-column: 5;
+}
+
+.shell[data-desktop] > .screen {
+  grid-row: 2;
+  grid-column: 3;
+  min-width: 0;
+}
+
+/* The split pane ("Open to the right") — its own column beside the main pane,
+   hosting a full workspace screen (reader OR editor) with its own header. */
+.shell[data-desktop] > .split-pane {
+  grid-row: 2;
+  grid-column: 4;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.shell[data-desktop] > .split-pane .screen {
+  min-width: 0;
+}
+
+/* No dimming scrims, no bottom-pill gutter when docked. */
+.shell[data-desktop] > .scrim {
+  display: none;
+}
+
+/* …except overlay scrims (palette / quick switcher): keep them clickable so
+   click-outside closes the modal, just without the mobile dimming. */
+.shell[data-desktop] > .scrim.scrim--overlay {
+  display: block;
+  background: transparent;
+}
+
+/* Quick switcher / command palette: on desktop these float as a centered
+   top modal (Obsidian), not the mobile bottom-anchored sheet. */
+.shell[data-desktop] > .quickopen {
+  left: 50%;
+  right: auto;
+  top: 120px;
+  transform: translateX(-50%);
+  width: 560px;
+  max-width: calc(100vw - 40px);
+}
+
+.shell[data-desktop] .sidebar__content {
+  padding-bottom: 16px;
+}
+
+/* The view switcher moves into the titlebar cluster on desktop (see
+   .titlebar-switcher below) — the in-panel switcher is mobile-only. */
+[data-desktop] .sidebar__switcher {
+  display: none;
+}
+
+/* ---------- Ribbon (left icon strip, always visible) ---------- */
+
+.ribbon {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  width: var(--ribbon-w);
+  padding-top: 6px;
+  background: var(--surface-raised);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+
+.ribbon__item {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: var(--r-sm);
+  color: var(--text-faint);
+  transition:
+    background var(--dur) var(--ease),
+    color var(--dur) var(--ease);
+}
+
+.ribbon__item:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.ribbon__item:active {
+  background: var(--surface-press);
+}
+
+/* ---------- Desktop top strip (window drag region + tabs) ---------- */
+
+.desktop-chrome {
+  display: flex;
+  align-items: center;
+  height: var(--titlebar-h);
+  background: var(--surface-raised);
+  border-bottom: 1px solid var(--border);
+  padding-right: 8px;
+  user-select: none;
+  /* macOS: the strip drags the window; controls opt out with no-drag. */
+  -webkit-app-region: drag;
+}
+
+/* Sidebar view-switcher cluster — desktop's replacement for the in-panel
+   switcher, shown only while the sidebar is docked open (see App.tsx /
+   DesktopChrome.tsx). Same views/icons/order as .sidebar__switcher. */
+.titlebar-switcher {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 4px;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+}
+
+.titlebar-switcher__item {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: var(--r-sm);
+  color: var(--text-faint);
+  transition:
+    background var(--dur) var(--ease),
+    color var(--dur) var(--ease);
+}
+
+.titlebar-switcher__item:hover {
+  background: var(--surface);
+  color: var(--text-muted);
+}
+
+.titlebar-switcher__item[data-active] {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.desktop-chrome__traffic {
+  width: var(--traffic-inset);
+  flex: none;
+}
+
+.desktop-chrome__drag {
+  flex: 1;
+  align-self: stretch;
+}
+
+.desktop-tabs {
+  display: flex;
+  align-items: stretch;
+  align-self: stretch;
+  gap: 2px;
+  padding-left: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-app-region: no-drag;
+}
+
+.desktop-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+/* Obsidian-shaped tab: rounded top only, full titlebar height — the active
+   tab's background matches the content pane below so it reads as fused to
+   it, with no gap/sliver of titlebar showing beneath. */
+.desktop-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  box-sizing: border-box;
+  max-width: 200px;
+  padding: 0 4px 0 12px;
+  border-radius: 6px 6px 0 0;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: var(--text-sm);
+  cursor: default;
+  -webkit-app-region: no-drag;
+}
+
+.desktop-tab:hover {
+  background: var(--surface-press);
+  color: var(--text-muted);
+}
+
+.desktop-tab[data-active] {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.desktop-tab__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.desktop-tab__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  color: var(--text-faint);
+  opacity: 0;
+  transition: opacity 120ms var(--ease);
+}
+
+.desktop-tab:hover .desktop-tab__close,
+.desktop-tab[data-active] .desktop-tab__close {
+  opacity: 1;
+}
+
+.desktop-tab__close:hover {
+  background: var(--surface-press);
+  color: var(--text);
+}
+
+/* The pin badge is state, not an affordance — always visible on a pinned
+   tab, unlike the hover-revealed close button it replaces. */
+.desktop-tab__pin {
+  opacity: 1;
+  color: var(--text-muted);
+}
+
+/* Tab context menu: Close is disabled while pinned. */
+.sheet__item:disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.desktop-tab__new {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: 8px;
+  color: var(--text-muted);
+  -webkit-app-region: no-drag;
+}
+
+.desktop-tab__new:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.desktop-chrome__toggle {
+  width: 34px;
+  height: 30px;
+  border-radius: 8px;
+  color: var(--text-muted);
+  -webkit-app-region: no-drag;
+}
+
+.desktop-chrome__toggle:hover {
+  background: var(--surface);
+}
+
+.desktop-chrome__toggle[data-active] {
+  color: var(--text);
+}
+
+/* Tab-list dropdown: anchored popup listing every open tab (Obsidian's tab
+   overflow menu), toggled by the chevron button next to the tab strip. */
+.tablist-dropdown {
+  position: relative;
+  align-self: center;
+  -webkit-app-region: no-drag;
+}
+
+.tablist-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 45;
+  min-width: 200px;
+  max-width: 280px;
+  max-height: 360px;
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-raised);
+  animation: overlay-in var(--dur) var(--ease);
+}
+
+.tablist-menu__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: var(--r-sm);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  text-align: left;
+}
+
+.tablist-menu__item:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.tablist-menu__item[data-active] {
+  color: var(--text);
+}
+
+.tablist-menu__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Electron only: reserve the traffic-light gutter (class set by the preload). */
+html.is-electron .shell[data-desktop] {
+  --traffic-inset: 72px;
+}
+
+.graph-slider__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.graph-slider input[type='range'] {
+  width: 100%;
+  accent-color: var(--ember);
+  height: 20px;
+}
+
+/* ============================================================
+   Desktop pane chrome (Obsidian parity): per-pane header, the
+   reader's expanded properties table, and the bottom-right status
+   bar. Desktop-only — gated by nav.desktop / [data-desktop], same
+   as the three-pane layout above. Phones render none of this; their
+   existing .workspace-top / collapsed .props pill are untouched.
+   ============================================================ */
+
+/* ---------- Pane header (NoteScreen + EditScreen, desktop) ---------- */
+
+.pane-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 6px;
+  flex-shrink: 0;
+  background: transparent;
+}
+
+.pane-header__group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.pane-header .pane-header__btn {
+  width: 36px;
+  height: 36px;
+}
+
+.pane-header__crumbs {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: var(--text-sm);
+}
+
+.pane-header__crumb-wrap {
+  display: inline-flex;
+  align-items: center;
+}
+
+.pane-header__crumb {
+  border-radius: var(--r-sm);
+  padding: 2px 3px;
+}
+
+.pane-header__crumb--link {
+  color: var(--text-faint);
+}
+
+.pane-header__crumb--link:hover {
+  color: var(--text-muted);
+  background: var(--surface);
+}
+
+.pane-header__crumb--leaf {
+  color: var(--text);
+  font-weight: 550;
+}
+
+.pane-header__sep {
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+
+/* ---------- Expanded properties table (reader, desktop) ---------- */
+
+.props-expanded {
+  display: grid;
+  grid-template-columns: minmax(90px, auto) 1fr;
+  row-gap: 8px;
+  column-gap: 14px;
+  padding: 10px 0 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--text-sm);
+}
+
+.props-expanded__head {
+  grid-column: 1 / -1;
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.props-expanded__key {
+  color: var(--text-faint);
+}
+
+.props-expanded__value {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+/* Array property values (tags) reuse the reader's tag-pill look (.md .tag in
+   markdown.css) — same tokens, repeated here since this block sits outside
+   the .md-scoped markdown renderer. */
+.props-expanded__value .tag {
+  display: inline-block;
+  font-size: 0.82em;
+  font-weight: 550;
+  color: var(--link);
+  background: var(--link-soft);
+  border-radius: 999px;
+  padding: 0.05em 0.6em;
+}
+
+/* ---------- Status bar (App.tsx, desktop) ---------- */
+
+/* Pinned to the window's absolute bottom-right corner, floating OVER the
+   right sidebar — exactly where Obsidian puts it (see the reference shots),
+   not offset to the centre pane's edge. */
+.status-bar {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  z-index: 15; /* above the panes, below overlays (dialogs/sheets start at 30) */
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 26px;
+  padding: 0 12px;
+  background: var(--surface-raised);
+  border-top: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+  border-radius: var(--r-sm) 0 0 0;
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+/* ---------- Hotkey settings ---------- */
+
+.hotkeys-filter {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  transition:
+    background var(--dur) var(--ease),
+    color var(--dur) var(--ease),
+    border-color var(--dur) var(--ease);
+}
+
+.hotkeys-filter[aria-pressed='true'] {
+  background: var(--ember-soft);
+  border-color: var(--ember);
+  color: var(--ember);
+}
+
+.hotkey-row {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+.hotkey-row__chords {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin-left: auto;
+}
+
+.hotkey-row__conflict {
+  font-size: var(--text-xs);
+  color: var(--danger);
+  margin-top: 2px;
+  line-height: 1.4;
+}
+
+.hotkey-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 6px 0 10px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.hotkey-chip--recording {
+  border-color: var(--ember);
+  color: var(--ember);
+  padding-right: 10px;
+}
+
+.hotkey-chip__remove {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+
+.hotkey-chip__remove:active {
+  background: var(--surface-press);
+  color: var(--danger);
+}
+
+/* ===========================================================================
+   Desktop context menus (WP: desktop context menus for FileActionsSheet /
+   NoteMenu). Obsidian-style compact popups anchored at the right-click
+   pointer (file-tree) or below the ⋮ trigger (note menu), replacing the
+   phone's full-width bottom sheet ONLY on desktop. Mobile keeps `.sheet`
+   above, byte-for-byte untouched. Rows reuse `.sheet__item`/`--danger`; this
+   block just supplies the compact anchored container plus a desktop hover
+   state (`.sheet__item` only has `:active`, for touch feedback).
+   =========================================================================== */
+
+.ctx-menu {
+  position: fixed;
+  z-index: 45;
+  width: 220px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-raised);
+  animation: ctx-menu-in var(--dur) var(--ease);
+}
+
+@keyframes ctx-menu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.ctx-menu .sheet__item {
+  min-height: 34px;
+  padding: 6px 10px;
+  font-size: var(--text-sm);
+}
+
+.ctx-menu .sheet__item:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.ctx-menu .sheet__item--danger:hover {
+  background: var(--surface);
+  color: var(--danger);
+}
+
+/* ---------- WP8: desktop file-explorer header ---------- */
+
+/* Icon-only row (new note / new folder / sort / collapse-all), left-aligned,
+   replacing the mobile A–Z text pill — Obsidian file-explorer parity. Mobile
+   keeps `.filetree__toolbar` exactly as before; this modifier only applies
+   alongside it on desktop. */
+.shell[data-desktop] .filetree__toolbar--desktop {
+  gap: 2px;
+}
+
+.shell[data-desktop] .filetree__toolbar--desktop .iconbtn {
+  width: 28px;
+  height: 28px;
+}
+
+/* ---------- WP7: desktop linked-mentions panel ---------- */
+/* Everything below is scoped under [data-desktop] .sidebar-right so the
+   mobile backlinks drawer (same component, JSX-branched) is never touched. */
+
+/* Obsidian's backlinks pane has no big pane title — it opens straight with
+   the icon row + "Linked mentions". Hide the shared serif head on desktop
+   only (the mobile drawer keeps it). */
+.shell[data-desktop] .sidebar-right .rightbar__head {
+  display: none;
+}
+
+/* Header icon row — collapse/expand-all toggle. Only one control: this
+   feature set has no sort/order setting to back a second button. */
+.shell[data-desktop] .sidebar-right .rightbar__toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 4px 8px 0;
+}
+
+.shell[data-desktop] .sidebar-right .rightbar__toolbtn {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-sm);
+}
+
+.shell[data-desktop] .sidebar-right .rightbar__toolbtn:hover {
+  background: var(--surface);
+}
+
+.shell[data-desktop] .sidebar-right .rightbar__toolbtn[data-active] {
+  color: var(--text);
+  background: var(--surface-press);
+}
+
+/* "Linked mentions" title row: a small faint total replaces the old plain
+   section label, right-aligned like Obsidian Mac's backlinks pane. */
+.shell[data-desktop] .sidebar-right .rightbar__title-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 12px;
+}
+
+/* Sentence case, not the mobile drawer's uppercase-tracked label — matches
+   Obsidian Mac's "Linked mentions" row. */
+.shell[data-desktop] .sidebar-right .rightbar__title {
+  font-size: var(--text-sm);
+  font-weight: 550;
+  color: var(--text-muted);
+}
+
+.shell[data-desktop] .sidebar-right .rightbar__total {
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+/* One collapsible group per source note. */
+.shell[data-desktop] .sidebar-right .rightbar__group {
+  margin-bottom: 2px;
+}
+
+.shell[data-desktop] .sidebar-right .rightbar__group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 4px 12px;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: background var(--dur) var(--ease);
+}
+
+.shell[data-desktop] .sidebar-right .rightbar__group-head:hover {
+  background: var(--surface);
+}
+
+.shell[data-desktop] .sidebar-right .rightbar__group-chevron {
+  color: var(--text-faint);
+  flex-shrink: 0;
+  transition: transform var(--dur) var(--ease);
+}
+
+.shell[data-desktop] .sidebar-right .rightbar__group-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  font-family: inherit;
+  font-size: var(--text-md);
+  font-weight: 550;
+  color: var(--text);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.shell[data-desktop] .sidebar-right .rightbar__group-count {
+  font-size: var(--text-xs);
+  font-weight: 550;
+  color: var(--text-faint);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 8px;
+  flex-shrink: 0;
+}
+
+/* Each mention: its own rounded, bordered snippet card (Obsidian's excerpt
+   boxes), indented under the group title, clickable through to the source
+   note. Text styling comes from the existing .hit__excerpt rule so the
+   current note's highlighted mention (<mark>) keeps working unchanged. */
+.shell[data-desktop] .sidebar-right .rightbar__mention {
+  display: block;
+  margin: 2px 12px 8px 32px;
+  width: calc(100% - 44px);
+  padding: 8px 10px;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+.shell[data-desktop] .sidebar-right .rightbar__mention:hover {
+  background: var(--surface-raised);
+  border-color: var(--border-strong);
+}
+
+.shell[data-desktop] .sidebar-right .rightbar__mention .hit__excerpt {
+  margin-top: 0;
+}
+
+/* ---------- WP10: editable properties (desktop reader) ---------- */
+
+/* Three columns now (key | value | per-row delete), overriding the plain
+   2-column rule above by specificity — that rule still serves as the base
+   layout, this just makes room for the delete affordance. */
+.shell[data-desktop] .props-expanded {
+  grid-template-columns: minmax(90px, auto) 1fr auto;
+}
+
+/* Each row is a `display:contents` wrapper: its children (key, value, delete
+   button) land directly in the parent grid exactly as before, but grouping
+   them lets the delete button react to a hover anywhere on the row. */
+.shell[data-desktop] .props-expanded__row {
+  display: contents;
+}
+
+.shell[data-desktop] .props-expanded__delete {
+  opacity: 0;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  color: var(--text-faint);
+  border-radius: var(--r-sm);
+  transition:
+    opacity var(--dur) var(--ease),
+    color var(--dur) var(--ease),
+    background var(--dur) var(--ease);
+}
+
+.shell[data-desktop] .props-expanded__row:hover .props-expanded__delete,
+.shell[data-desktop] .props-expanded__delete:focus-visible {
+  opacity: 1;
+}
+
+.shell[data-desktop] .props-expanded__delete:hover {
+  color: var(--danger);
+  background: var(--surface);
+}
+
+/* Scalar value shown as a borderless button so the table doesn't look
+   "form-y" at rest — only a hover hints that it's editable, like Obsidian. */
+.shell[data-desktop] .props-expanded__value--edit {
+  font: inherit;
+  text-align: left;
+  color: var(--text-muted);
+  border-radius: var(--r-sm);
+  padding: 1px 5px;
+  margin: -1px -5px;
+  transition: background var(--dur) var(--ease);
+}
+
+.shell[data-desktop] .props-expanded__value--edit:hover {
+  background: var(--surface);
+}
+
+.shell[data-desktop] .props-expanded__value-input,
+.shell[data-desktop] .props-expanded__add-key,
+.shell[data-desktop] .props-expanded__add-value {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  padding: 1px 5px;
+  min-width: 0;
+}
+
+.shell[data-desktop] .props-expanded__value-input {
+  width: 100%;
+}
+
+/* Tag pill remove control: small, faint, brightens on hover/focus — reuses
+   the existing --link tag color rather than introducing a new one. */
+.shell[data-desktop] .props-expanded__tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.shell[data-desktop] .props-expanded__tag-remove {
+  display: grid;
+  place-items: center;
+  width: 13px;
+  height: 13px;
+  color: var(--link);
+  opacity: 0.55;
+  border-radius: 999px;
+  transition: opacity var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+
+.shell[data-desktop] .props-expanded__tag-remove:hover,
+.shell[data-desktop] .props-expanded__tag-remove:focus-visible {
+  opacity: 1;
+  background: color-mix(in srgb, var(--link) 20%, transparent);
+}
+
+.shell[data-desktop] .props-expanded__tag-input {
+  width: 56px;
+  font: inherit;
+  font-size: 0.82em;
+  color: var(--text-muted);
+  background: none;
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  padding: 0.05em 0.6em;
+}
+
+.shell[data-desktop] .props-expanded__tag-input:focus {
+  border-style: solid;
+  border-color: var(--border-strong);
+  outline: none;
+}
+
+/* "Add property" — faint affordance at the table's foot, Obsidian-style;
+   small footprint so it reads as a hint, not a form. */
+.shell[data-desktop] .props-expanded__add {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  padding: 3px 6px 3px 2px;
+  color: var(--text-faint);
+  font-size: var(--text-sm);
+  border-radius: var(--r-sm);
+  transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+
+.shell[data-desktop] .props-expanded__add:hover {
+  color: var(--text-muted);
+  background: var(--surface);
+}
+
+.shell[data-desktop] .props-expanded__add-row {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.shell[data-desktop] .props-expanded__add-key {
+  width: 110px;
+  flex-shrink: 0;
+}
+
+.shell[data-desktop] .props-expanded__add-value {
+  flex: 1;
+  min-width: 0;
+}
+
+.shell[data-desktop] .props-expanded__add-confirm,
+.shell[data-desktop] .props-expanded__add-cancel {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  color: var(--text-faint);
+  border-radius: var(--r-sm);
+  transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+
+.shell[data-desktop] .props-expanded__add-confirm:hover {
+  color: var(--ember);
+  background: var(--surface);
+}
+
+.shell[data-desktop] .props-expanded__add-cancel:hover {
+  color: var(--text-muted);
+  background: var(--surface);
+}
+
+/* ---------- WP9: right-sidebar tabs + unlinked mentions ---------- */
+/* Everything below is scoped under [data-desktop] .sidebar-right so the
+   mobile backlinks drawer (same component, JSX-branched) is never touched. */
+
+/* Icon tab row (Obsidian Mac's right-sidebar tab group): Backlinks / Outline. */
+.shell[data-desktop] .sidebar-right .rightbar__tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.shell[data-desktop] .sidebar-right .rightbar__tab {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r-sm);
+  color: var(--text-faint);
+  transition:
+    background var(--dur) var(--ease),
+    color var(--dur) var(--ease);
+}
+
+.shell[data-desktop] .sidebar-right .rightbar__tab:hover {
+  background: var(--surface);
+  color: var(--text-muted);
+}
+
+.shell[data-desktop] .sidebar-right .rightbar__tab[aria-selected='true'] {
+  color: var(--text);
+  background: var(--surface-press);
+  box-shadow: inset 0 -2px 0 var(--text);
+}
+
+/* Outline tab: heading list, indented by level (mirrors NoteInfoSheet's
+   outline sheet — same base/step indent, just no fixed "H1"/"H2" gutter). */
+.shell[data-desktop] .sidebar-right .rightbar__outline {
+  padding: 4px 0;
+}
+
+.shell[data-desktop] .sidebar-right .rightbar__outline-item {
+  display: block;
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 12px;
+  text-align: left;
+  font-family: inherit;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shell[data-desktop] .sidebar-right .rightbar__outline-item:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+/* Unlinked mentions: same collapsible-group/boxed-snippet look as linked
+   mentions — .rightbar__group / .rightbar__group-head / .rightbar__group-title
+   / .rightbar__mention are reused verbatim for each source row, so only the
+   section's own separator + collapsed-by-default header need new rules. */
+.shell[data-desktop] .sidebar-right .rightbar__unlinked {
+  margin-top: 6px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+/* ---------- Desktop graph view (Obsidian parity) ---------- */
+
+/* The settings panel floats as a rounded card below the pane header, top-
+   right of the canvas — Obsidian's graph-settings card — instead of the
+   phone's full-height right drawer. No scrim on desktop: the card stays up
+   while the canvas is used, closed via its X. */
+.shell[data-desktop] .graph-panel__scrim {
+  display: none;
+}
+
+.shell[data-desktop] .graph-panel {
+  top: calc(var(--titlebar-h) + 48px);
+  right: calc(var(--rw) + 14px);
+  bottom: auto;
+  width: 300px;
+  max-height: min(560px, calc(100vh - var(--titlebar-h) - 96px));
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+/* Sentence-case section rows (Filters / Groups / Display / Forces), per the
+   reference card — the drawer's uppercase micro-labels read wrong at card
+   scale. */
+.shell[data-desktop] .graph-panel__section-head {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: var(--text-sm);
+  font-weight: 550;
+  color: var(--text);
+}
+
+/* ---------- Hover page preview (⌘/Ctrl-hover a link, desktop) ---------- */
+
+.hover-preview {
+  position: fixed;
+  z-index: 45;
+  width: 380px;
+  max-width: calc(100vw - 16px);
+  max-height: 340px;
+  overflow-y: auto;
+  padding: 14px 16px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-raised);
+  animation: ctx-menu-in var(--dur) var(--ease);
+}
+
+.hover-preview__title {
+  font-family: var(--font-display);
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
+/* Previewed content reads at excerpt scale, not full note scale. */
+.hover-preview .md {
+  font-size: var(--text-sm);
+}
+
+/* ---------- Desktop density & notices (Obsidian parity) ---------- */
+
+/* File-explorer rows: Obsidian desktop is ~26px per row with a subtle 6px
+   highlight radius — the 44px pill rows are phone touch ergonomics. Density
+   only, and only when docked; the mobile tree is untouched. */
+.shell[data-desktop] .tree-row {
+  min-height: 0;
+  padding: 2px 8px;
+  border-radius: var(--r-sm);
+}
+
+/* Vault-bar controls at desktop scale: the sync columns were the full 44px
+   touch target, towering over the gear. 28px buttons (the docked-header
+   convention) with a 13px glyph match Obsidian's bottom-bar icons. */
+.shell[data-desktop] .sidebar__vaultbar .iconbtn {
+  width: 28px;
+  height: 28px;
+}
+
+.shell[data-desktop] .sidebar__vaultbar .sync-columns {
+  height: 13px;
+  gap: 2px;
+  padding: 0 1px;
+}
+
+.shell[data-desktop] .sidebar__vaultbar .sync-columns .col {
+  width: 3px;
+}
+
+/* Sync/conflict notices become bottom-right toasts (Obsidian's notice stack)
+   instead of a full-width strip floating over all three panes. The mobile
+   banner keeps its translucent tint over a single surface; docked, the same
+   tint is layered over an opaque raised surface so the workspace can't bleed
+   through the card. Above the status bar (15) and every overlay (≤50). */
+.shell[data-desktop] .banners-layer {
+  top: auto;
+  left: auto;
+  right: 12px;
+  bottom: 38px;
+  width: 380px;
+  max-width: calc(100vw - 24px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.shell[data-desktop] .banners-layer .banner {
+  margin: 0;
+  background-color: var(--surface-raised);
+  border-radius: var(--r-md);
+}
+
+.shell[data-desktop] .banners-layer .banner--error,
+.shell[data-desktop] .banners-layer .banner--conflict {
+  background-image: linear-gradient(var(--danger-soft), var(--danger-soft));
+}
+
+.shell[data-desktop] .banners-layer .banner--info {
+  background-image: linear-gradient(var(--link-soft), var(--link-soft));
 }

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { getGitEngine, vaultDir, type Author, type GitProgress } from '@/engine';
-import { useSettings } from './settings';
+import { deviceNoun } from '@/lib/device';
+import { activeVaultIsLocal, useSettings } from './settings';
 import { vaultService } from './vault';
 
 export type SyncPhase =
@@ -54,8 +55,14 @@ export class SyncService {
     }
   }
 
+  /** Local-only vaults (desktop opened folders): git is never touched. */
+  private localOnly(): boolean {
+    return activeVaultIsLocal(useSettings.getState().settings);
+  }
+
   /** Called by VaultService after every local content change. */
   notifyEdit(): void {
+    if (this.localOnly()) return;
     useSync.setState((s) => ({ pendingCount: s.pendingCount + 1 }));
     const { autoPushDebounceSec } = useSettings.getState().settings;
     if (autoPushDebounceSec === null) return;
@@ -107,6 +114,7 @@ export class SyncService {
    * never lost data (TD-20).
    */
   async syncNow(reason: string): Promise<void> {
+    if (this.localOnly()) return;
     if (this.syncing) {
       this.queued = true;
       return;
@@ -123,7 +131,7 @@ export class SyncService {
       useSync.setState({ error: null, progress: null, phase: 'committing' });
       await this.engine.commitAll({
         dir,
-        message: `vault: android edits — ${this.stamp()} (${reason})`,
+        message: `vault: ${deviceNoun()} edits — ${this.stamp()} (${reason})`,
         author,
       });
 
@@ -139,7 +147,7 @@ export class SyncService {
         await this.engine.fetch({ dir });
         const merge = await this.engine.merge({
           dir,
-          conflictSuffix: `from phone ${this.stamp().replace(':', '.')}`,
+          conflictSuffix: `from ${deviceNoun()} ${this.stamp().replace(':', '.')}`,
           author,
         });
         if (merge.result !== 'up-to-date') pulledSomething = true;
@@ -170,7 +178,10 @@ export class SyncService {
       });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      const offline = /offline|unable to resolve host|unknownhost/i.test(message);
+      // "could not resolve host(name)" covers CLI git (https) and ssh wording.
+      const offline = /offline|unable to resolve host|could not resolve host|unknownhost/i.test(
+        message,
+      );
       useSync.setState({
         phase: offline ? 'offline' : 'error',
         error: offline ? null : message,

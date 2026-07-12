@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { getGitEngine, vaultDir, type CommitInfo } from '@/engine';
 import { noteTitle } from '@/lib/paths';
+import { activeVaultIsLocal, useSettings } from '@/services';
 import { useNav } from '@/state/nav';
 import { IconBack, IconChevronRight } from '@/ui/icons';
 
@@ -9,6 +10,10 @@ export function HistoryScreen({ path }: { path?: string }) {
   const nav = useNav();
   const [commits, setCommits] = useState<CommitInfo[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // A local-only vault may not even be a repo; when it is one (managed from
+  // the command line), its CLI history is still worth showing — so only the
+  // failure message changes, not the attempt.
+  const localVault = activeVaultIsLocal(useSettings((s) => s.settings));
 
   useEffect(() => {
     let cancelled = false;
@@ -39,8 +44,19 @@ export function HistoryScreen({ path }: { path?: string }) {
       <div className="scroll" style={{ padding: '4px var(--pad-screen)' }}>
         {error && (
           <div className="state">
-            <p className="state__title">Couldn't load history</p>
-            <p className="state__hint">{error}</p>
+            {localVault ? (
+              <>
+                <p className="state__title">No history</p>
+                <p className="state__hint">
+                  This vault is a local folder without git, so there are no versions to show.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="state__title">Couldn't load history</p>
+                <p className="state__hint">{error}</p>
+              </>
+            )}
           </div>
         )}
         {!error && commits === null && <div className="state" />}
@@ -82,7 +98,7 @@ export function HistoryScreen({ path }: { path?: string }) {
         )}
         {path && commits && commits.length > 0 && (
           <p style={{ fontSize: 'var(--text-xs)', color: 'var(--text-faint)', padding: '12px 4px' }}>
-            Tap a commit to see that version and restore it.
+            Select a commit to see that version and restore it.
           </p>
         )}
       </div>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { joinPath, stripExt } from '@/lib/paths';
 import { useVault, vaultService } from '@/services';
 import { openNote, useNav } from '@/state/nav';
+import { defaultNewNoteFolder } from '@/ui/templates';
 import { IconNote, IconPlus, IconSearch } from '@/ui/icons';
 
 /** Obsidian's quick switcher: type-ahead over titles, then full text. */
@@ -51,13 +52,16 @@ export function QuickOpen({ onClose }: { onClose: () => void }) {
   const create = async () => {
     if (!createTarget) return;
     onClose(); // overlay gone before the write, matching open()
-    const path = await vaultService.createNote(createTarget.folder, createTarget.name);
+    // A folder typed into the query wins; otherwise fall back to the default
+    // new-note location (feature: "New file location should be an option").
+    const folder = createTarget.folder || defaultNewNoteFolder();
+    const path = await vaultService.createNote(folder, createTarget.name);
     useNav.getState().push({ name: 'edit', path });
   };
 
   return (
     <>
-      <div className="scrim" onClick={onClose} />
+      <div className="scrim scrim--overlay" onClick={onClose} />
       <div className="quickopen">
         <input
           ref={inputRef}

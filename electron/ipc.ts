@@ -1,0 +1,32 @@
+/** IPC channel names shared between the Electron main process and the preload. */
+export const CH = {
+  gitSetCredentials: 'git:setCredentials',
+  gitHasCredentials: 'git:hasCredentials',
+  gitClearCredentials: 'git:clearCredentials',
+  gitListRemoteBranches: 'git:listRemoteBranches',
+  gitClone: 'git:clone',
+  gitRepoInfo: 'git:repoInfo',
+  gitDeleteRepo: 'git:deleteRepo',
+  gitStatus: 'git:status',
+  gitCommitAll: 'git:commitAll',
+  gitFetch: 'git:fetch',
+  gitMerge: 'git:merge',
+  gitPush: 'git:push',
+  gitLog: 'git:log',
+  gitFileAtCommit: 'git:fileAtCommit',
+  /** main → renderer streaming progress event. */
+  gitProgress: 'git:progress',
+  fsList: 'fs:list',
+  fsRead: 'fs:read',
+  fsReadMany: 'fs:readMany',
+  fsWrite: 'fs:write',
+  fsWriteBinary: 'fs:writeBinary',
+  fsRemove: 'fs:remove',
+  fsRename: 'fs:rename',
+  fsMkdir: 'fs:mkdir',
+  fsRmdir: 'fs:rmdir',
+  fsFileUrl: 'fs:fileUrl',
+  openExternal: 'shell:openExternal',
+  /** Native folder picker for "Open a folder as vault" (desktop only). */
+  vaultPickFolder: 'vault:pickFolder',
+} as const;

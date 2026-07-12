@@ -19,6 +19,11 @@ const AXIS_BIAS = 1.4;
 export const FLING_VELOCITY = 0.35;
 /** How much recent history informs the release velocity. */
 const VELOCITY_WINDOW_MS = 100;
+/**
+ * If the finger lifts more than this after the last movement sample, the drag
+ * ended in a hold, not a flick — the stale trailing velocity is discarded.
+ */
+const RELEASE_IDLE_MS = 100;
 
 /**
  * Which axis a drag has committed to, or null while it's still ambiguous.
@@ -34,10 +39,17 @@ export function claimAxis(dx: number, dy: number, slop = AXIS_SLOP): 'x' | 'y' |
   return null;
 }
 
-/** Signed x velocity in px/ms over the trailing window (0 if not enough data). */
-export function velocityX(samples: Sample[]): number {
+/**
+ * Signed x velocity in px/ms over the trailing window (0 if not enough data).
+ * Pass `releaseTime` (the touchend timestamp) so a drag that moved fast, then
+ * held still, then lifted doesn't register the stale flick: if the release lands
+ * more than {@link RELEASE_IDLE_MS} after the last movement sample, velocity is
+ * 0 and the position rule alone decides where the drawer settles.
+ */
+export function velocityX(samples: Sample[], releaseTime?: number): number {
   if (samples.length < 2) return 0;
   const last = samples[samples.length - 1];
+  if (releaseTime !== undefined && releaseTime - last.t > RELEASE_IDLE_MS) return 0;
   let first = samples[0];
   for (const s of samples) {
     if (last.t - s.t <= VELOCITY_WINDOW_MS) {

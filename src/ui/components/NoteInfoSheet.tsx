@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { HeadingInfo } from '@/lib/outline';
+import { flushActiveEditor } from '@/lib/editorFlush';
 import { parseFrontmatter, serializeFrontmatter } from '@/lib/frontmatter';
-import { basename, dirname, isHtmlPath, joinPath } from '@/lib/paths';
+import { basename, isHtmlPath, noteTitle } from '@/lib/paths';
 import { vaultService, useVault, type Backlink } from '@/services';
 import { openNote, useNav } from '@/state/nav';
 import { scrollToHeading } from '@/ui/markdown/Markdown';
+import { backlinkContext } from '@/ui/workspace/RightSidebar';
 import { IconGraph, IconMove, IconPlus, IconStar, IconX } from '@/ui/icons';
 import { FolderPicker } from './FolderPicker';
 
@@ -35,13 +37,14 @@ export function NoteInfoSheet({
         title={`Move "${basename(path)}" to…`}
         onClose={() => setMoving(false)}
         onPick={async (folder) => {
-          const to = joinPath(folder, basename(path));
           setMoving(false);
-          if (to !== path && dirname(to) !== dirname(path)) {
-            onClose();
-            await vaultService.renameFile(path, to);
-            nav.replace({ name: 'note', path: to });
-          }
+          onClose();
+          // Safe move (dedupe + inbound link rewrite + bookmark migration);
+          // moveFile no-ops when the folder is unchanged and returns the final
+          // path so we can repoint every tab's history.
+          await flushActiveEditor();
+          const finalPath = await vaultService.moveFile(path, folder);
+          if (finalPath !== path) nav.renamePath(path, finalPath);
         }}
       />
     );
@@ -87,7 +90,9 @@ export function NoteInfoSheet({
 
         <div style={{ overflowY: 'auto', padding: '4px 10px 8px' }}>
           {tab === 'outline' && <OutlinePanel outline={outline} onClose={onClose} />}
-          {tab === 'backlinks' && <BacklinksPanel backlinks={backlinks} onClose={onClose} />}
+          {tab === 'backlinks' && (
+            <BacklinksPanel backlinks={backlinks} title={noteTitle(path)} onClose={onClose} />
+          )}
           {tab === 'properties' && <PropertiesEditor path={path} />}
         </div>
       </div>
@@ -121,7 +126,15 @@ function OutlinePanel({ outline, onClose }: { outline: HeadingInfo[]; onClose: (
   );
 }
 
-function BacklinksPanel({ backlinks, onClose }: { backlinks: Backlink[]; onClose: () => void }) {
+function BacklinksPanel({
+  backlinks,
+  title,
+  onClose,
+}: {
+  backlinks: Backlink[];
+  title: string;
+  onClose: () => void;
+}) {
   if (backlinks.length === 0) {
     return (
       <p className="state__hint" style={{ padding: 14 }}>
@@ -144,11 +157,7 @@ function BacklinksPanel({ backlinks, onClose }: { backlinks: Backlink[]; onClose
           }}
         >
           <span style={{ fontWeight: 600 }}>{b.title}</span>
-          {b.context && (
-            <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
-              {b.context}
-            </span>
-          )}
+          {b.context && <span className="hit__excerpt">{backlinkContext(b.context, title)}</span>}
         </button>
       ))}
     </>

@@ -1,37 +1,34 @@
 import { App as CapApp } from '@capacitor/app';
 import { Keyboard } from '@capacitor/keyboard';
 import { StatusBar, Style } from '@capacitor/status-bar';
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { getGitEngine, isNativePlatform, setVaultDir } from '@/engine';
 import {
+  activeVaultIsLocal,
   captureSharedItems,
   syncService,
   useSettings,
   vaultService,
 } from '@/services';
-import { currentScreen, openNote, useNav, type Screen } from '@/state/nav';
+import { currentScreen, openNote, useNav } from '@/state/nav';
+import { installGlobalHotkeys } from '@/services/hotkeys';
 import { Banners } from '@/ui/components/Banners';
-import { IconCalendar, IconNotePlus } from '@/ui/icons';
-import { ArtifactScreen } from '@/ui/screens/ArtifactScreen';
-import { GraphScreen } from '@/ui/screens/GraphScreen';
-import { HistoryScreen } from '@/ui/screens/HistoryScreen';
-import { NoteScreen } from '@/ui/screens/NoteScreen';
-import { NoteVersionScreen } from '@/ui/screens/NoteVersionScreen';
 import { OnboardingScreen } from '@/ui/screens/OnboardingScreen';
-import { SettingsScreen } from '@/ui/screens/SettingsScreen';
 import { BottomPill } from '@/ui/workspace/BottomPill';
-import { SidebarToggle } from '@/ui/workspace/chrome';
+import { HoverPreviewCard } from '@/ui/components/HoverPreview';
+import { DesktopChrome } from '@/ui/workspace/DesktopChrome';
 import { DrawerGestures } from '@/ui/workspace/DrawerGestures';
+import { OverlayHost } from '@/ui/workspace/OverlayHost';
+import { Ribbon } from '@/ui/workspace/Ribbon';
+import { RightSidebar } from '@/ui/workspace/RightSidebar';
 import { Sidebar } from '@/ui/workspace/Sidebar';
-import { usePullDown } from '@/ui/hooks/usePullDown';
+import { SplitPane } from '@/ui/workspace/SplitPane';
+import { StatusBar as DesktopStatusBar } from '@/ui/workspace/StatusBar';
+import { WorkspaceScreen } from '@/ui/workspace/WorkspaceScreen';
+import { useIsDesktop } from '@/ui/hooks/useIsDesktop';
 import './styles/tokens.css';
 import './styles/app.css';
 import './styles/markdown.css';
-
-// CodeMirror is the heaviest chunk — load it only when editing starts (P-4).
-const EditScreen = lazy(() =>
-  import('@/ui/screens/EditScreen').then((m) => ({ default: m.EditScreen })),
-);
 
 type Boot = 'loading' | 'onboarding' | 'ready';
 
@@ -39,8 +36,24 @@ export function App() {
   const [boot, setBoot] = useState<Boot>('loading');
   const nav = useNav();
   const sidebarOpen = useNav((s) => s.sidebarOpen);
+  const rightSidebarOpen = useNav((s) => s.rightSidebarOpen);
+  const isDesktop = useIsDesktop();
   const theme = useSettings((s) => s.settings.theme);
   const fontScale = useSettings((s) => s.settings.fontScale);
+
+  // Desktop docks both sidebars as columns; phone shows one overlay at a time.
+  // Flag nav so its panel/navigation logic stops the mobile "close the other"
+  // behavior, and dock both panels open on entry (Obsidian desktop's default).
+  useEffect(() => {
+    const nav = useNav.getState();
+    nav.setDesktop(isDesktop);
+    nav.setOverlay('none'); // no bottom-pill overlays in docked mode
+    if (isDesktop) {
+      useNav.setState({ sidebarOpen: true, rightSidebarOpen: true });
+    } else {
+      useNav.setState({ sidebarOpen: false, rightSidebarOpen: false });
+    }
+  }, [isDesktop]);
 
   // Boot: load settings, decide onboarding vs vault.
   useEffect(() => {
@@ -54,13 +67,20 @@ export function App() {
         .repoInfo({ dir: settings.activeVault })
         .catch(() => ({ exists: false }));
 
-      if (settings.setupComplete && info.exists) {
-        await vaultService.initialize();
-        syncService.applySettings();
-        setBoot('ready');
-        void syncService.onAppActive();
-        const shared = await captureSharedItems();
-        if (shared) openNote(shared);
+      // Local-only folder vaults (desktop) have no repo to find — the vault is
+      // valid if its files load. A vanished folder falls back to onboarding.
+      const localVault = activeVaultIsLocal(settings);
+      if (settings.setupComplete && (info.exists || localVault)) {
+        try {
+          await vaultService.initialize();
+          syncService.applySettings();
+          setBoot('ready');
+          void syncService.onAppActive();
+          const shared = await captureSharedItems();
+          if (shared) openNote(shared);
+        } catch {
+          setBoot('onboarding');
+        }
       } else {
         setBoot('onboarding');
       }
@@ -87,6 +107,11 @@ export function App() {
     mq.addEventListener('change', apply);
     return () => mq.removeEventListener('change', apply);
   }, [theme, fontScale]);
+
+  // Global keyboard shortcuts (desktop): command palette, quick switcher, nav,
+  // etc. Installed once for the app's lifetime — commands/hotkeys read fresh
+  // state on every keydown, so this effect never needs to re-run.
+  useEffect(() => installGlobalHotkeys(), []);
 
   // Android hardware/gesture back (P-6).
   useEffect(() => {
@@ -131,6 +156,7 @@ export function App() {
 
   const screen = currentScreen(nav);
   const showPill =
+    !isDesktop && // desktop navigates via the tab strip + keyboard, not the pill
     (screen.name === 'empty' ||
       screen.name === 'note' ||
       screen.name === 'edit' ||
@@ -138,14 +164,41 @@ export function App() {
     !nav.editorFocused; // typing: the format toolbar takes the pill's place
 
   return (
-    <div className="shell">
+    <div
+      className="shell"
+      data-desktop={isDesktop || undefined}
+      data-left={isDesktop && sidebarOpen ? '' : undefined}
+      data-right={isDesktop && rightSidebarOpen ? '' : undefined}
+      data-split={isDesktop && nav.split !== null ? '' : undefined}
+      onMouseDownCapture={(e) => {
+        // Focus follows the clicked pane (Obsidian's active pane): the pane a
+        // mousedown lands in receives the subsequent action's navigation.
+        // Sidebar/chrome clicks leave focus alone, so tree rows keep opening
+        // in the last-active pane. No-op without a split (incl. all of mobile).
+        if (nav.split === null) return;
+        const el = e.target as HTMLElement;
+        const pane = el.closest('.split-pane')
+          ? 'split'
+          : el.closest('.screen')
+            ? 'main'
+            : null;
+        if (pane !== null && pane !== nav.focusedPane) nav.setFocusedPane(pane);
+      }}
+    >
+      {isDesktop && <Ribbon />}
+      {isDesktop && <DesktopChrome />}
       <WorkspaceScreen screen={screen} />
+      {isDesktop && nav.split !== null && <SplitPane />}
+      {isDesktop && <DesktopStatusBar />}
+      {isDesktop && <HoverPreviewCard />}
       <div className="banners-layer">
         <Banners />
       </div>
+      <OverlayHost />
       {showPill && <BottomPill />}
       <SidebarLayer open={sidebarOpen} />
-      <DrawerGestures />
+      <RightSidebar open={rightSidebarOpen} />
+      {!isDesktop && <DrawerGestures />}
     </div>
   );
 }
@@ -169,74 +222,3 @@ function SidebarLayer({ open }: { open: boolean }) {
   );
 }
 
-function WorkspaceScreen({ screen }: { screen: Screen }) {
-  switch (screen.name) {
-    case 'empty':
-      return <EmptyView />;
-    case 'note':
-      return <NoteScreen key={screen.path} path={screen.path} heading={screen.heading} />;
-    case 'edit':
-      return (
-        <Suspense fallback={<div className="screen" />}>
-          <EditScreen key={screen.path} path={screen.path} />
-        </Suspense>
-      );
-    case 'artifact':
-      return <ArtifactScreen key={screen.path} path={screen.path} />;
-    case 'settings':
-      return <SettingsScreen />;
-    case 'history':
-      return <HistoryScreen path={screen.path} />;
-    case 'noteVersion':
-      return (
-        <NoteVersionScreen path={screen.path} oid={screen.oid} when={screen.when} />
-      );
-    case 'graph':
-      return <GraphScreen path={screen.path} />;
-  }
-}
-
-/** "No file is open" — Obsidian's empty state, Basalt-flavored. */
-function EmptyView() {
-  const nav = useNav();
-  const pullRef = usePullDown<HTMLDivElement>(() => nav.setOverlay('quickopen'));
-  return (
-    <div className="screen" ref={pullRef}>
-      <header className="workspace-top">
-        <SidebarToggle />
-      </header>
-      <div className="state" style={{ justifyContent: 'center' }}>
-        <div className="columns-hero" aria-hidden="true">
-          <div className="col" />
-          <div className="col" />
-          <div className="col" />
-          <div className="col" />
-          <div className="col" />
-        </div>
-        <p className="state__title">No note is open</p>
-        <p className="state__hint">Browse the vault from the top-left, or start writing.</p>
-        <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
-          <button
-            className="btn btn--ghost"
-            style={{ border: '1px solid var(--border)' }}
-            onClick={async () => {
-              const path = await vaultService.openDailyNote();
-              nav.push({ name: 'note', path });
-            }}
-          >
-            <IconCalendar size={18} /> Today
-          </button>
-          <button
-            className="btn btn--primary"
-            onClick={async () => {
-              const path = await vaultService.createNote('', 'Untitled');
-              nav.push({ name: 'edit', path });
-            }}
-          >
-            <IconNotePlus size={18} /> New note
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}

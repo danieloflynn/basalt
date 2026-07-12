@@ -26,10 +26,12 @@ import { openFileExternally } from '@/engine';
 import { vaultService } from '@/services';
 import { openNote, useNav } from '@/state/nav';
 import { ArtifactFrame } from '@/ui/components/ArtifactFrame';
+import { cancelHoverPreview, maybeShowHoverPreview } from '@/ui/components/HoverPreview';
 import { IconCheck, IconImage, IconNote } from '@/ui/icons';
 import {
   rehypeCallouts,
   rehypeHeadingAnchors,
+  rehypeHoistEmbeds,
   rehypeSpecialBlocks,
   rehypeTasks,
 } from './rehypePlugins';
@@ -120,6 +122,11 @@ function SmartAnchor(props: ComponentProps<'a'>) {
       <a
         {...anchorProps(props)}
         className={resolved ? 'wikilink' : 'wikilink wikilink--unresolved'}
+        onMouseMove={(e) => {
+          // ⌘/Ctrl-hover page preview (desktop; no-op on phones).
+          if (resolved && isMarkdownPath(resolved)) maybeShowHoverPreview(e, resolved, heading);
+        }}
+        onMouseLeave={cancelHoverPreview}
         onClick={(e) => {
           e.preventDefault();
           if (!resolved) {
@@ -150,6 +157,12 @@ function SmartAnchor(props: ComponentProps<'a'>) {
   return (
     <a
       {...anchorProps(props)}
+      onMouseMove={(e) => {
+        if (external) return;
+        const resolved = vaultService.resolveLink(decodeURIComponent(href), ctx.path);
+        if (resolved && isMarkdownPath(resolved)) maybeShowHoverPreview(e, resolved);
+      }}
+      onMouseLeave={cancelHoverPreview}
       onClick={(e) => {
         e.preventDefault();
         if (external) {
@@ -176,7 +189,8 @@ export function scrollToHeading(heading: string): void {
 
 function anchorProps(props: ComponentProps<'a'>): ComponentProps<'a'> {
   const { children: _children, ...rest } = props;
-  return { ...rest, href: props.href ?? '#' };
+  // '' comes from remark link nodes with no url; React warns on empty href.
+  return { ...rest, href: props.href || '#' };
 }
 
 function VaultImage(props: ComponentProps<'img'>) {
@@ -502,6 +516,7 @@ const processor = unified()
   .use(remarkObsidian)
   .use(remarkRehype)
   .use(rehypeTasks)
+  .use(rehypeHoistEmbeds)
   .use(rehypeCallouts)
   .use(rehypeHeadingAnchors)
   .use(rehypeSpecialBlocks)

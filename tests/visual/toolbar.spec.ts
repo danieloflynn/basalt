@@ -126,12 +126,25 @@ test('the toolbar shows only while the editor body is focused', async ({ page })
   await expect(page.locator('.bottompill')).toBeVisible();
 });
 
-test('a horizontal swipe on the toolbar does not open the drawer', async ({ page }) => {
+test('a horizontal swipe on the toolbar scrolls it and does not open the drawer', async ({
+  page,
+}) => {
   await onboard(page);
   await newNoteFocused(page);
-  const box = await page.locator('.editor-toolbar').boundingBox();
+  const toolbar = page.locator('.editor-toolbar');
+  // Pre-scroll the row to its right end so a rightward (drawer-opening) swipe has
+  // room to scroll it back left.
+  await toolbar.evaluate((el) => el.scrollTo(el.scrollWidth, 0));
+  const before = await toolbar.evaluate((el) => el.scrollLeft);
+  expect(before).toBeGreaterThan(0);
+
+  const box = await toolbar.boundingBox();
   if (!box) throw new Error('toolbar not found');
   const y = box.y + box.height / 2;
   await swipe(page, { x: box.x + 40, y }, { x: box.x + box.width - 8, y });
+
+  // The toolbar consumed the horizontal swipe (scrolled), so the drawer stayed shut.
   await expect(page.locator('.sidebar[data-open]')).toHaveCount(0);
+  const after = await toolbar.evaluate((el) => el.scrollLeft);
+  expect(after).toBeLessThan(before); // positive signal: it scrolled, wasn't the drawer's
 });

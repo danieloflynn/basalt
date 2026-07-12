@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { currentScreen, openNote, tabLabel, useNav } from './nav';
+import { currentScreen, focusedScreen, openNote, tabLabel, useNav } from './nav';
 
 const nav = () => useNav.getState();
 
@@ -93,10 +93,22 @@ describe('nav viewMode (sticky editing)', () => {
 
   it('editing mode reroutes every note open to the editor', () => {
     nav().setViewMode('editing');
-    nav().push({ name: 'note', path: 'a.md', heading: 'Intro' }); // e.g. from the sidebar
+    nav().push({ name: 'note', path: 'a.md' }); // e.g. from the sidebar
     expect(currentScreen(nav())).toEqual({ name: 'edit', path: 'a.md' });
     openNote('b.md'); // e.g. from quick open / a wikilink
     expect(currentScreen(nav())).toEqual({ name: 'edit', path: 'b.md' });
+  });
+
+  it('preserves the heading anchor when rerouting to the editor ([[Note#Section]])', () => {
+    nav().setViewMode('editing');
+    // A [[Note#Section]] tap opens {name:'note', heading} — the reroute to the
+    // editor must carry the heading through so the caret can land on it.
+    openNote('a.md', 'Section Two');
+    expect(currentScreen(nav())).toEqual({
+      name: 'edit',
+      path: 'a.md',
+      heading: 'Section Two',
+    });
   });
 
   it('explicit edit pushes stay edit regardless of mode (fresh-note flows)', () => {
@@ -169,5 +181,168 @@ describe('nav renamePath', () => {
       oid: 'abc',
       when: 1,
     });
+  });
+});
+
+describe('nav reset', () => {
+  it('clears searchSeed so a previous vault query does not leak after a vault switch', () => {
+    nav().seedSearch('#projects');
+    expect(nav().searchSeed).toBe('#projects');
+    nav().reset();
+    expect(nav().searchSeed).toBeNull();
+  });
+});
+
+describe('split pane', () => {
+  beforeEach(() => nav().reset());
+
+  it('openToTheRight creates a focused one-entry pane; closeSplit clears it', () => {
+    nav().push({ name: 'note', path: 'main.md' });
+    nav().openToTheRight('a.md');
+
+    expect(nav().focusedPane).toBe('split');
+    expect(nav().split).toEqual({ history: [{ name: 'note', path: 'a.md' }], index: 0 });
+    expect(focusedScreen(nav())).toEqual({ name: 'note', path: 'a.md' });
+    // The main pane is untouched underneath.
+    expect(currentScreen(nav())).toEqual({ name: 'note', path: 'main.md' });
+
+    nav().closeSplit();
+    expect(nav().split).toBeNull();
+    expect(nav().focusedPane).toBe('main');
+    expect(focusedScreen(nav())).toEqual({ name: 'note', path: 'main.md' });
+  });
+
+  it('openToTheRight honors the global editing view mode', () => {
+    nav().setViewMode('editing');
+    nav().openToTheRight('a.md');
+    expect(focusedScreen(nav())).toEqual({ name: 'edit', path: 'a.md' });
+    nav().setViewMode('reading');
+  });
+
+  it('push and replace land in the focused pane', () => {
+    nav().push({ name: 'note', path: 'main.md' });
+    nav().openToTheRight('a.md');
+
+    nav().push({ name: 'note', path: 'b.md' }); // split is focused
+    expect(nav().split?.history).toHaveLength(2);
+    expect(focusedScreen(nav())).toEqual({ name: 'note', path: 'b.md' });
+    expect(currentScreen(nav())).toEqual({ name: 'note', path: 'main.md' });
+
+    nav().replace({ name: 'edit', path: 'b.md' }); // view toggle in the split
+    expect(focusedScreen(nav())).toEqual({ name: 'edit', path: 'b.md' });
+    expect(nav().split?.history).toHaveLength(2);
+
+    nav().setFocusedPane('main');
+    nav().push({ name: 'note', path: 'c.md' }); // main is focused again
+    expect(currentScreen(nav())).toEqual({ name: 'note', path: 'c.md' });
+    expect(focusedScreen(nav())).toEqual({ name: 'note', path: 'c.md' });
+    expect(nav().split?.history[1]).toEqual({ name: 'edit', path: 'b.md' }); // untouched
+  });
+
+  it('back/forward are pane-scoped, with pane-scoped arrow probes', () => {
+    nav().push({ name: 'note', path: 'main1.md' });
+    nav().push({ name: 'note', path: 'main2.md' });
+    nav().openToTheRight('a.md');
+    nav().push({ name: 'note', path: 'b.md' }); // split history: a → b
+
+    expect(nav().canBackIn('split')).toBe(true);
+    expect(nav().canBackIn('main')).toBe(true);
+
+    expect(nav().back()).toBe(true); // split: b → a
+    expect(focusedScreen(nav())).toEqual({ name: 'note', path: 'a.md' });
+    expect(currentScreen(nav())).toEqual({ name: 'note', path: 'main2.md' }); // main untouched
+    expect(nav().canBackIn('split')).toBe(false);
+    expect(nav().canForwardIn('split')).toBe(true);
+    expect(nav().back()).toBe(false); // split history exhausted — NOT main's
+
+    expect(nav().forward()).toBe(true); // split: a → b
+    expect(focusedScreen(nav())).toEqual({ name: 'note', path: 'b.md' });
+    expect(nav().forward()).toBe(false);
+
+    nav().setFocusedPane('main');
+    expect(nav().back()).toBe(true); // main: main2 → main1
+    expect(currentScreen(nav())).toEqual({ name: 'note', path: 'main1.md' });
+    expect(focusedScreen(nav())).toEqual({ name: 'note', path: 'main1.md' });
+    expect(nav().split?.index).toBe(1); // split untouched
+  });
+
+  it('renamePath rewrites split history entries too', () => {
+    nav().openToTheRight('a.md');
+    nav().push({ name: 'note', path: 'other.md' });
+    nav().renamePath('a.md', 'b.md');
+    expect(nav().split?.history[0]).toEqual({ name: 'note', path: 'b.md' });
+    expect(nav().split?.history[1]).toEqual({ name: 'note', path: 'other.md' });
+    nav().renamePath('missing.md', 'x.md');
+    expect(nav().split?.history[0]).toEqual({ name: 'note', path: 'b.md' });
+  });
+
+  it('newTab and switchTab refocus the main pane; reset clears the split', () => {
+    nav().openToTheRight('a.md');
+    nav().newTab({ name: 'note', path: 'n.md' });
+    expect(nav().focusedPane).toBe('main');
+    expect(nav().split).not.toBeNull(); // pane stays open, focus moves
+
+    nav().setFocusedPane('split');
+    nav().switchTab(0);
+    expect(nav().focusedPane).toBe('main');
+
+    nav().reset();
+    expect(nav().split).toBeNull();
+    expect(nav().focusedPane).toBe('main');
+  });
+});
+
+describe('pinned tabs', () => {
+  beforeEach(() => nav().reset());
+
+  it('push from a pinned tab opens a new tab beside it instead of navigating', () => {
+    nav().push({ name: 'note', path: 'a.md' });
+    nav().togglePin(0);
+    nav().push({ name: 'note', path: 'b.md' });
+
+    expect(nav().tabs).toHaveLength(2);
+    expect(nav().active).toBe(1);
+    expect(currentScreen(nav())).toEqual({ name: 'note', path: 'b.md' });
+    // The pinned tab still shows a.md, and the new tab is not pinned.
+    expect(nav().tabs[0].history[nav().tabs[0].index]).toEqual({ name: 'note', path: 'a.md' });
+    expect(nav().tabs[1].pinned).toBeUndefined();
+  });
+
+  it('the new tab is inserted directly after the pinned tab, not at the end', () => {
+    nav().push({ name: 'note', path: 'a.md' });
+    nav().newTab({ name: 'note', path: 'z.md' });
+    nav().switchTab(0);
+    nav().togglePin(0);
+    nav().push({ name: 'note', path: 'b.md' });
+    expect(nav().tabs).toHaveLength(3);
+    expect(nav().active).toBe(1);
+    expect(tabLabel(nav().tabs[1])).toBe('b');
+    expect(tabLabel(nav().tabs[2])).toBe('z');
+  });
+
+  it('same-file pushes (heading jumps, reader/editor reroutes) stay in the pinned tab', () => {
+    nav().push({ name: 'note', path: 'a.md' });
+    nav().togglePin(0);
+    nav().push({ name: 'note', path: 'a.md', heading: 'h2' });
+    expect(nav().tabs).toHaveLength(1);
+    expect(currentScreen(nav())).toEqual({ name: 'note', path: 'a.md', heading: 'h2' });
+    expect(nav().tabs[0].pinned).toBe(true);
+  });
+
+  it('a pinned tab refuses to close and blocks back/forward', () => {
+    nav().push({ name: 'note', path: 'a.md' });
+    nav().push({ name: 'note', path: 'a.md', heading: 'h2' });
+    nav().togglePin(0);
+
+    expect(nav().canBack()).toBe(false);
+    expect(nav().back()).toBe(false);
+    nav().closeTab(0);
+    expect(nav().tabs).toHaveLength(1);
+    expect(nav().tabs[0].pinned).toBe(true);
+
+    nav().togglePin(0);
+    expect(nav().canBack()).toBe(true);
+    expect(nav().back()).toBe(true);
+    expect(nav().canForward()).toBe(true);
   });
 });

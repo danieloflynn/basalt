@@ -11,7 +11,7 @@ import { useNav } from '@/state/nav';
 
 /** Touches inside these never move the drawer. */
 const IGNORE =
-  '.sheet, .dialog, .quickopen, .vault-menu, .vault-add-overlay, canvas, input, textarea, .scrim:not(.scrim--sidebar)';
+  '.sheet, .dialog, .quickopen, .vault-menu, .vault-add-overlay, canvas, input, textarea, .scrim:not(.scrim--sidebar):not(.scrim--rightbar)';
 
 /**
  * Everything that differs between the left drawer and a (planned) right one.
@@ -26,6 +26,12 @@ interface DrawerSide {
   dir: 1 | -1;
   toTransform: (progress: number) => string;
   isOpen: () => boolean;
+  /**
+   * Whether the OPPOSITE drawer is open. A swipe while it is showing belongs
+   * to its controller (closing it) — e.g. a left-swipe with the left drawer
+   * open closes the left drawer, it must never open this one.
+   */
+  otherOpen: () => boolean;
   commit: (open: boolean) => void;
 }
 
@@ -35,13 +41,21 @@ const LEFT: DrawerSide = {
   dir: 1,
   toTransform: (p) => `translateX(${(p - 1) * 100}%)`,
   isOpen: () => useNav.getState().sidebarOpen,
+  otherOpen: () => useNav.getState().rightSidebarOpen,
   commit: (open) => (open ? useNav.getState().openSidebar() : useNav.getState().closeSidebar()),
 };
 
-// A right drawer is a second controller with, e.g.:
-//   { sidebar: '.sidebar-right', scrim: '.scrim--sidebar-right', dir: -1,
-//     toTransform: (p) => `translateX(${(1 - p) * 100}%)`, isOpen/commit → right nav }
-// plus its own CSS mirror of the .sidebar / .scrim--sidebar block.
+/** Mirrored right drawer (backlinks): swipe left opens, swipe right closes. */
+const RIGHT: DrawerSide = {
+  sidebar: '.sidebar-right',
+  scrim: '.scrim--rightbar',
+  dir: -1,
+  toTransform: (p) => `translateX(${(1 - p) * 100}%)`,
+  isOpen: () => useNav.getState().rightSidebarOpen,
+  otherOpen: () => useNav.getState().sidebarOpen,
+  commit: (open) =>
+    open ? useNav.getState().openRightSidebar() : useNav.getState().closeRightSidebar(),
+};
 
 /**
  * Installs document-level touch listeners driving one edge drawer. Renders
@@ -136,6 +150,9 @@ function installDrawer(side: DrawerSide): () => void {
     if (tracking || active) return;
     if (e.touches.length !== 1) return;
     if (useNav.getState().overlay !== 'none') return;
+    // Route to the visible drawer: while the opposite one is open, every
+    // horizontal swipe is its close gesture, never our open gesture.
+    if (side.otherOpen()) return;
     const t = e.touches[0];
     if ((e.target as Element | null)?.closest?.(IGNORE)) return;
 
@@ -161,6 +178,11 @@ function installDrawer(side: DrawerSide): () => void {
     const dy = t.clientY - startY;
 
     if (!active) {
+      // A long-pressed note being dragged in the file tree owns the touch.
+      if (document.documentElement.hasAttribute('data-tree-drag')) {
+        tracking = false;
+        return;
+      }
       const axis = claimAxis(dx, dy);
       if (axis === 'y') {
         tracking = false;
@@ -176,7 +198,9 @@ function installDrawer(side: DrawerSide): () => void {
 
       active = true;
       const { sidebar } = els();
-      width = sidebar?.getBoundingClientRect().width || window.innerWidth - 52;
+      // Full-width drawers: fall back to the whole viewport if the panel hasn't
+      // been measured yet. Normally the measured element width is authoritative.
+      width = sidebar?.getBoundingClientRect().width || window.innerWidth;
       document.documentElement.setAttribute('data-drawer-drag', '');
     }
 
@@ -202,7 +226,9 @@ function installDrawer(side: DrawerSide): () => void {
       return; // never claimed — nothing was applied, nothing to settle
     }
     const p = drawerProgress(startOpen, side.dir * (lastX - startX), width);
-    settle(settleOpen(p, side.dir * velocityX(samples)));
+    // Pass the release timestamp so a fast drag that then holds still before
+    // lifting settles by position, not by the stale trailing flick velocity.
+    settle(settleOpen(p, side.dir * velocityX(samples, e.timeStamp)));
   };
 
   document.addEventListener('touchstart', onStart, { passive: true });
@@ -220,11 +246,20 @@ function installDrawer(side: DrawerSide): () => void {
 
 /**
  * Obsidian-style drawer swipes: drag right anywhere in the workspace to pull
- * the sidebar out under your finger, drag/fling left to put it away. Renders
- * nothing — {@link installDrawer} drives `.sidebar` / `.scrim--sidebar`
- * transforms directly and commits the result to nav state on release.
+ * the sidebar out under your finger, drag left for the backlinks drawer, and
+ * drag/fling back to put either away. Renders nothing — {@link installDrawer}
+ * drives the panel/scrim transforms directly and commits the result to nav
+ * state on release. `otherOpen` keeps the two controllers exclusive, so a
+ * left-swipe with the left drawer open closes it instead of opening the right.
  */
 export function DrawerGestures() {
-  useEffect(() => installDrawer(LEFT), []);
+  useEffect(() => {
+    const offLeft = installDrawer(LEFT);
+    const offRight = installDrawer(RIGHT);
+    return () => {
+      offLeft();
+      offRight();
+    };
+  }, []);
   return null;
 }

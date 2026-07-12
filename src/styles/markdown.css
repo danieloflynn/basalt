@@ -111,6 +111,12 @@
   min-width: 0;
 }
 
+/* Loose-list task bodies hold <p> children; the first must sit flush with the
+   checkbox instead of inheriting the paragraph top margin. */
+.md li.task > .task__body > p:first-child {
+  margin-top: 0;
+}
+
 .md a {
   color: var(--link);
   text-decoration: none;

@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { getGitEngine, useSyncProgress } from '@/engine/hooks';
-import { setVaultDir } from '@/engine';
+import { isDesktopPlatform, setVaultDir } from '@/engine';
 import { syncService, useSettings, vaultService } from '@/services';
+import { deviceNoun, keystoreName } from '@/lib/device';
 import { IconBack, IconChevronRight } from '@/ui/icons';
+import { OpenFolderVault } from '@/ui/screens/OpenFolderVault';
 
-type Step = 'welcome' | 'connect' | 'branch' | 'cloning';
+type Step = 'welcome' | 'connect' | 'branch' | 'cloning' | 'folder';
 
 /**
  * Guided setup: repo URL + token -> validate & list branches -> pick branch
@@ -20,7 +22,7 @@ export function OnboardingScreen({
   onDone: () => void;
   onCancel?: () => void;
 }) {
-  const { update } = useSettings();
+  const { settings, update } = useSettings();
   const [step, setStep] = useState<Step>(mode === 'first' ? 'welcome' : 'connect');
   const [url, setUrl] = useState('');
   const [username, setUsername] = useState('');
@@ -29,16 +31,25 @@ export function OnboardingScreen({
   const [branch, setBranch] = useState('main');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Second vault: one PAT is shared across repos, so reuse the stored
+  // username/token and only ask for the repository (with a per-repo access
+  // reminder). An escape hatch reveals the full form to change credentials.
+  const [useNewCreds, setUseNewCreds] = useState(false);
   const progress = useSyncProgress();
 
   const engine = getGitEngine();
+  const reuseCreds = mode === 'add' && !useNewCreds;
 
   const validate = async () => {
     setBusy(true);
     setError(null);
     try {
       const cleanUrl = normalizeRepoUrl(url);
-      await engine.setCredentials({ username: username.trim(), token: token.trim() });
+      // Reuse mode keeps the stored PAT; listRemoteBranches authenticates with
+      // it (and surfaces a clear error if the token can't reach this repo).
+      if (!reuseCreds) {
+        await engine.setCredentials({ username: username.trim(), token: token.trim() });
+      }
       const remote = await engine.listRemoteBranches({ url: cleanUrl });
       setUrl(cleanUrl);
       setBranches(remote.branches);
@@ -62,17 +73,19 @@ export function OnboardingScreen({
           ? 'vault'
           : nextVaultDir(settings.vaults.map((v) => v.dir));
       const name = url.replace(/\.git$/, '').split('/').slice(-1)[0] || 'Vault';
+      // Reuse mode inherits the account already stored for the other vault(s).
+      const effectiveUser = reuseCreds ? settings.username : username.trim();
 
       await engine.clone({ url, dir, branch: chosen });
       await update({
         repoUrl: url,
         branch: chosen,
-        username: username.trim(),
-        authorName: username.trim() || 'Basalt',
+        username: effectiveUser,
+        authorName: effectiveUser || 'Basalt',
         setupComplete: true,
         vaults: [
           ...settings.vaults,
-          { dir, name, repoUrl: url, branch: chosen, username: username.trim() },
+          { dir, name, repoUrl: url, branch: chosen, username: effectiveUser },
         ],
         activeVault: dir,
       });
@@ -85,6 +98,10 @@ export function OnboardingScreen({
       setStep('branch');
     }
   };
+
+  if (step === 'folder') {
+    return <OpenFolderVault onDone={onDone} onCancel={() => setStep('welcome')} />;
+  }
 
   return (
     <div className="screen" style={{ padding: 'var(--safe-top) 0 var(--safe-bottom)' }}>
@@ -119,6 +136,15 @@ export function OnboardingScreen({
           >
             Connect a repository
           </button>
+          {isDesktopPlatform && (
+            <button
+              className="btn btn--ghost"
+              style={{ minWidth: 220, border: '1px solid var(--border)' }}
+              onClick={() => setStep('folder')}
+            >
+              Open a folder as vault
+            </button>
+          )}
         </div>
       )}
 
@@ -145,21 +171,69 @@ export function OnboardingScreen({
               placeholder="danieloflynn/vault"
               type="url"
             />
-            <Field
-              label="GitHub username"
-              hint="Used for commits made from this phone"
-              value={username}
-              onChange={setUsername}
-              placeholder="danieloflynn"
-            />
-            <Field
-              label="Access token"
-              hint="A fine-grained personal access token with read/write access to just this repository. GitHub → Settings → Developer settings → Fine-grained tokens."
-              value={token}
-              onChange={setToken}
-              placeholder="github_pat_…"
-              type="password"
-            />
+
+            {reuseCreds ? (
+              <p
+                style={{
+                  marginTop: 16,
+                  padding: '12px 14px',
+                  border: '1px solid var(--border)',
+                  borderRadius: 10,
+                  fontSize: 'var(--text-xs)',
+                  color: 'var(--text-faint)',
+                  lineHeight: 1.55,
+                }}
+              >
+                Using your saved account
+                {settings.username ? ` (@${settings.username})` : ''} and access token. Make sure
+                that token can reach this repository — fine-grained tokens grant access per
+                repository, so you may need to add this repo under the token's Repository access on
+                GitHub.{' '}
+                <button
+                  type="button"
+                  onClick={() => setUseNewCreds(true)}
+                  style={{
+                    color: 'var(--link)',
+                    background: 'none',
+                    border: 'none',
+                    padding: 0,
+                    font: 'inherit',
+                  }}
+                >
+                  Use a different account or token
+                </button>
+              </p>
+            ) : (
+              <>
+                <Field
+                  label="GitHub username"
+                  hint={`Used for commits made from this ${deviceNoun()}`}
+                  value={username}
+                  onChange={setUsername}
+                  placeholder="danieloflynn"
+                />
+                <Field
+                  label="Access token"
+                  hint="A fine-grained personal access token with read/write access to just this repository. GitHub → Settings → Developer settings → Fine-grained tokens."
+                  value={token}
+                  onChange={setToken}
+                  placeholder="github_pat_…"
+                  type="password"
+                />
+                {mode === 'add' && (
+                  <p
+                    style={{
+                      fontSize: 'var(--text-xs)',
+                      color: 'var(--text-faint)',
+                      marginTop: 10,
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    This replaces the token used for every vault on this {deviceNoun()}.
+                  </p>
+                )}
+              </>
+            )}
 
             {error && (
               <div className="banner banner--error" style={{ margin: '14px 0 0' }} role="alert">
@@ -170,22 +244,24 @@ export function OnboardingScreen({
             <button
               className="btn btn--primary"
               style={{ width: '100%', marginTop: 22 }}
-              disabled={!url.trim() || !token.trim() || busy}
+              disabled={!url.trim() || (!reuseCreds && !token.trim()) || busy}
               onClick={() => void validate()}
             >
               {busy ? 'Checking…' : 'Continue'}
             </button>
-            <p
-              style={{
-                fontSize: 'var(--text-xs)',
-                color: 'var(--text-faint)',
-                marginTop: 14,
-                lineHeight: 1.5,
-                textAlign: 'center',
-              }}
-            >
-              The token is stored in Android's secure keystore, on this phone only.
-            </p>
+            {!reuseCreds && (
+              <p
+                style={{
+                  fontSize: 'var(--text-xs)',
+                  color: 'var(--text-faint)',
+                  marginTop: 14,
+                  lineHeight: 1.5,
+                  textAlign: 'center',
+                }}
+              >
+                The token is stored in {keystoreName()}, on this {deviceNoun()} only.
+              </p>
+            )}
           </div>
         </>
       )}

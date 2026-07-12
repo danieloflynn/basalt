@@ -1,7 +1,8 @@
 import { useMemo, useRef, useState } from 'react';
 import type { TreeFolder, TreeNode } from '@/lib/tree';
-import { isHtmlPath, isMarkdownPath, noteTitle } from '@/lib/paths';
+import { dirname, isHtmlPath, isMarkdownPath, noteTitle } from '@/lib/paths';
 import {
+  activeVaultIsLocal,
   useSettings,
   useVault,
   vaultService,
@@ -9,23 +10,30 @@ import {
   type SearchHit,
 } from '@/services';
 import { useNav, type SidebarView } from '@/state/nav';
+import { useAnchoredMenu, type AnchorPoint } from '@/ui/hooks/useAnchoredMenu';
 import {
+  IconCheck,
   IconChevronRight,
+  IconChevronsUp,
+  IconClock,
   IconFolder,
   IconFolderPlus,
   IconNote,
   IconNotePlus,
   IconSearch,
   IconSettings,
+  IconSort,
   IconStar,
   IconTag,
 } from '@/ui/icons';
 import { Dialog } from '@/ui/components/Dialog';
 import { FileActionsSheet } from '@/ui/components/FileActionsSheet';
 import { SyncStatus } from '@/ui/components/SyncStatus';
+import { defaultNewNoteFolder } from '@/ui/templates';
 import { VaultMenu } from './VaultMenu';
 
-const VIEWS: {
+/** Shared with the desktop titlebar view-switcher cluster — same icons/order. */
+export const VIEWS: {
   view: SidebarView;
   label: string;
   icon: (p: { size?: number }) => React.ReactNode;
@@ -112,7 +120,8 @@ export function Sidebar({ open }: { open: boolean }) {
           </span>
           <span className="vaultbar__stats">{stats}</span>
         </button>
-        <SyncStatus />
+        {/* A local-only vault has nothing to sync — no dead button. */}
+        {!activeVaultIsLocal(settings) && <SyncStatus />}
         <button
           className="iconbtn vaultbar__gear"
           aria-label="Settings"
@@ -128,24 +137,180 @@ export function Sidebar({ open }: { open: boolean }) {
 }
 
 // ---------------------------------------------------------------------------
-// Files — collapsible tree, active note highlighted
+// Files — collapsible tree, active note highlighted, long-press drag to move
 // ---------------------------------------------------------------------------
+
+/** An armed/live note drag: ghost under the finger, folders as drop targets. */
+interface TreeDrag {
+  /** Path of the file being dragged. */
+  path: string;
+  /** Its home folder — dropping back there is a no-op, so it never highlights. */
+  home: string;
+  title: string;
+  /** Folder under the finger ('' = vault root); null = nothing droppable. */
+  target: string | null;
+  /** Finger position at arm time, so the ghost's first paint is placed. */
+  x: number;
+  y: number;
+}
+
+/**
+ * A pending file-actions sheet/menu: which node, and — only for a real
+ * desktop right-click — the pointer position to anchor a compact context
+ * menu at. Touch long-press (`onLongPress(node)`, no coords) always leaves
+ * `anchor` undefined, so it keeps getting the mobile bottom sheet even in a
+ * desktop-width browser window.
+ */
+interface ActionTarget {
+  node: TreeNode;
+  anchor?: { x: number; y: number };
+}
 
 function FilesPanel() {
   const tree = useVault((s) => s.tree);
   const sortOrder = useSettings((s) => s.settings.sortOrder);
   const { update } = useSettings();
+  const desktop = useNav((s) => s.desktop);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const [actionTarget, setActionTarget] = useState<TreeNode | null>(null);
+  const [actionTarget, setActionTarget] = useState<ActionTarget | null>(null);
+  const openActions = (node: TreeNode, x?: number, y?: number) =>
+    setActionTarget({ node, anchor: x !== undefined && y !== undefined ? { x, y } : undefined });
   const [creatingFolder, setCreatingFolder] = useState(false);
   const creatingNote = useRef(false);
+  const [drag, setDrag] = useState<TreeDrag | null>(null);
+  const ghostRef = useRef<HTMLDivElement>(null);
+  // One tree drag at a time — guards against two fingers each arming a drag.
+  const dragging = useRef(false);
+
+  // Desktop-only file-explorer header (WP8): sort-order popup + collapse-all.
+  const sortBtnRef = useRef<HTMLButtonElement>(null);
+  const [sortAnchor, setSortAnchor] = useState<AnchorPoint | null>(null);
+  const allFolderPaths = useMemo(() => collectFolderPaths(tree), [tree]);
+  const allCollapsed =
+    allFolderPaths.length > 0 && allFolderPaths.every((p) => collapsed.has(p));
+  const toggleCollapseAll = () => setCollapsed(allCollapsed ? new Set() : new Set(allFolderPaths));
+
+  /**
+   * A note row's long-press armed: from here the finger owns the touch.
+   * Releasing in place keeps the old behavior (the actions sheet); moving
+   * drags a ghost across the tree — folders highlight as drop targets, the
+   * panel auto-scrolls near its edges, and dropping on a folder (or the root
+   * area) moves the file there. `data-tree-drag` tells DrawerGestures to keep
+   * its hands off this touch; document-level listeners (passive: false, like
+   * DrawerGestures) let us preventDefault the scroll React's handlers can't.
+   */
+  const beginDrag = (node: TreeNode, startX: number, startY: number, pointerId: number) => {
+    // A second finger's 450ms hold must not arm a rival drag whose own onEnd
+    // would also commit a move — one drag owns the tree at a time.
+    if (dragging.current) return;
+    dragging.current = true;
+    const home = dirname(node.path);
+    document.documentElement.setAttribute('data-tree-drag', '');
+    const s = { x: startX, y: startY, moved: false, target: home as string | null, raf: 0 };
+
+    // Follow only the finger that armed this drag; a second finger landing
+    // mid-drag must not move the ghost or decide where the note lands.
+    const mine = (list: TouchList): Touch | undefined =>
+      Array.prototype.find.call(list, (t: Touch) => t.identifier === pointerId) as
+        | Touch
+        | undefined;
+
+    const findTarget = (): string | null => {
+      const el = document.elementFromPoint(s.x, s.y);
+      // Folder rows target themselves; file rows target their parent folder
+      // (dropping "onto a note" reads as "into its folder").
+      const row = el?.closest<HTMLElement>('[data-drop-folder]');
+      if (row) return row.dataset.dropFolder ?? '';
+      return el?.closest('.filetree, .sidebar .sidebar__content') ? '' : null;
+    };
+
+    // One rAF loop for the whole drag: it pins the ghost to the finger,
+    // auto-scrolls while the finger DWELLS near an edge (no move events fire
+    // then, so a move-driven version would stall), and re-aims the target.
+    const step = () => {
+      s.raf = requestAnimationFrame(step);
+      const ghost = ghostRef.current;
+      if (ghost) ghost.style.transform = ghostTransform(s.x, s.y);
+      const scroller = document.querySelector<HTMLElement>('.sidebar .sidebar__content');
+      if (scroller && s.moved) {
+        const r = scroller.getBoundingClientRect();
+        if (s.y < r.top + 56) scroller.scrollTop -= 7;
+        else if (s.y > r.bottom - 96) scroller.scrollTop += 7;
+      }
+      const target = s.moved ? findTarget() : home;
+      if (target !== s.target) {
+        s.target = target;
+        setDrag((d) => (d ? { ...d, target } : d));
+      }
+    };
+
+    const finish = () => {
+      cancelAnimationFrame(s.raf);
+      document.removeEventListener('touchmove', onMove);
+      document.removeEventListener('touchend', onEnd);
+      document.removeEventListener('touchcancel', onCancel);
+      document.documentElement.removeAttribute('data-tree-drag');
+      dragging.current = false;
+      setDrag(null);
+    };
+
+    const onMove = (e: TouchEvent) => {
+      const t = mine(e.touches);
+      if (!t) return;
+      e.preventDefault(); // the note owns this touch — no scrolling under it
+      if (Math.hypot(t.clientX - startX, t.clientY - startY) > 6) s.moved = true;
+      s.x = t.clientX;
+      s.y = t.clientY;
+    };
+
+    const onEnd = (e: TouchEvent) => {
+      // Commit only when OUR finger lifts (or the whole gesture ends); another
+      // finger's touchend must not drop this note at the first finger's
+      // position. Empty changedTouches = a wholesale release, which is ours.
+      if (e.changedTouches?.length && !mine(e.changedTouches)) return;
+      // Cancel the touchend or the browser synthesizes a click at the finger —
+      // it would land on whatever we render next (the sheet's scrim!) or, after
+      // a drop, on the folder row under the ghost, and undo what we just did.
+      if (e.cancelable) e.preventDefault();
+      const { moved, target } = s;
+      finish();
+      if (!moved) {
+        setActionTarget({ node }); // press-and-release: the actions sheet, as ever
+        return;
+      }
+      if (target === null || target === home) return; // dropped nowhere / back home
+      void (async () => {
+        const to = await vaultService.moveFile(node.path, target);
+        if (to !== node.path) useNav.getState().renamePath(node.path, to);
+      })();
+    };
+
+    // Our finger being cancelled (or a wholesale cancel) ends the drag; a
+    // stray cancel naming a different finger leaves ours running.
+    const onCancel = (e: TouchEvent) => {
+      if (!e.changedTouches?.length || mine(e.changedTouches)) finish();
+    };
+
+    document.addEventListener('touchmove', onMove, { passive: false });
+    document.addEventListener('touchend', onEnd);
+    document.addEventListener('touchcancel', onCancel);
+    setDrag({
+      path: node.path,
+      home,
+      title: isMarkdownPath(node.path) ? noteTitle(node.path) : node.name,
+      target: home,
+      x: startX,
+      y: startY,
+    });
+    s.raf = requestAnimationFrame(step);
+  };
 
   // Obsidian: new note opens the editor on "Untitled" — no naming dialog.
   const newNote = async () => {
     if (creatingNote.current) return; // double-tap guard
     creatingNote.current = true;
     try {
-      const path = await vaultService.createNote('', 'Untitled');
+      const path = await vaultService.createNote(defaultNewNoteFolder(), 'Untitled');
       useNav.getState().push({ name: 'edit', path });
     } finally {
       creatingNote.current = false;
@@ -162,35 +327,102 @@ function FilesPanel() {
   };
 
   return (
-    <div className="filetree">
-      <div className="filetree__toolbar">
-        <button
-          className="iconbtn"
-          aria-label={sortOrder === 'name' ? 'Sort by modified time' : 'Sort by name'}
-          onClick={() => void update({ sortOrder: sortOrder === 'name' ? 'modified' : 'name' })}
-          style={{ fontSize: 'var(--text-xs)', width: 'auto', padding: '0 10px', gap: 4 }}
-        >
-          {sortOrder === 'name' ? 'A–Z' : 'Recent'}
-        </button>
-        <span style={{ flex: 1 }} />
-        <button className="iconbtn" aria-label="New folder" onClick={() => setCreatingFolder(true)}>
-          <IconFolderPlus size={20} />
-        </button>
-        <button className="iconbtn" aria-label="New note" onClick={() => void newNote()}>
-          <IconNotePlus size={20} />
-        </button>
-      </div>
+    <div
+      className="filetree"
+      data-drop-root={(drag && drag.target === '' && drag.home !== '') || undefined}
+    >
+      {desktop ? (
+        // Obsidian-parity icon-only row: new note, new folder, sort, collapse
+        // all — left-aligned, no text pill (see mobile branch below).
+        <div className="filetree__toolbar filetree__toolbar--desktop">
+          <button className="iconbtn" aria-label="New note" onClick={() => void newNote()}>
+            <IconNotePlus size={16} />
+          </button>
+          <button className="iconbtn" aria-label="New folder" onClick={() => setCreatingFolder(true)}>
+            <IconFolderPlus size={16} />
+          </button>
+          <button
+            ref={sortBtnRef}
+            className="iconbtn"
+            aria-label="Change sort order"
+            aria-haspopup="menu"
+            aria-expanded={sortAnchor !== null}
+            onClick={() => {
+              // Unconditional open (like NoteScreen's "Note menu" trigger) —
+              // outside-click/Escape (via useAnchoredMenu) close it; a toggle
+              // here would race the outside-mousedown-close listener.
+              const r = sortBtnRef.current?.getBoundingClientRect();
+              if (r) setSortAnchor({ x: r.left, y: r.bottom + 6 });
+            }}
+          >
+            <IconSort size={16} />
+          </button>
+          <button
+            className="iconbtn"
+            aria-label={allCollapsed ? 'Expand all' : 'Collapse all'}
+            onClick={toggleCollapseAll}
+          >
+            <IconChevronsUp size={16} />
+          </button>
+        </div>
+      ) : (
+        <div className="filetree__toolbar">
+          <button
+            className="iconbtn"
+            aria-label={sortOrder === 'name' ? 'Sort by modified time' : 'Sort by name'}
+            onClick={() => void update({ sortOrder: sortOrder === 'name' ? 'modified' : 'name' })}
+            style={{ fontSize: 'var(--text-xs)', width: 'auto', padding: '0 10px', gap: 4 }}
+          >
+            {sortOrder === 'name' ? 'A–Z' : 'Recent'}
+          </button>
+          <span style={{ flex: 1 }} />
+          <button className="iconbtn" aria-label="New folder" onClick={() => setCreatingFolder(true)}>
+            <IconFolderPlus size={20} />
+          </button>
+          <button className="iconbtn" aria-label="New note" onClick={() => void newNote()}>
+            <IconNotePlus size={20} />
+          </button>
+        </div>
+      )}
+
+      {sortAnchor && (
+        <SortMenu
+          anchor={sortAnchor}
+          sortOrder={sortOrder}
+          onSelect={(order) => {
+            void update({ sortOrder: order });
+            setSortAnchor(null);
+          }}
+          onClose={() => setSortAnchor(null)}
+        />
+      )}
 
       <TreeLevel
         folder={tree}
         depth={0}
         collapsed={collapsed}
         onToggle={toggle}
-        onLongPress={setActionTarget}
+        onLongPress={openActions}
+        onArm={beginDrag}
+        drag={drag}
       />
 
+      {drag && (
+        <div
+          className="tree-drag-ghost"
+          ref={ghostRef}
+          style={{ transform: ghostTransform(drag.x, drag.y) }}
+        >
+          <span className="tree-row__name">{drag.title}</span>
+        </div>
+      )}
+
       {actionTarget && (
-        <FileActionsSheet node={actionTarget} onClose={() => setActionTarget(null)} />
+        <FileActionsSheet
+          node={actionTarget.node}
+          anchor={actionTarget.anchor}
+          onClose={() => setActionTarget(null)}
+        />
       )}
       {/* Folders keep the dialog — they have no inline title to rename by. */}
       {creatingFolder && (
@@ -210,18 +442,91 @@ function FilesPanel() {
   );
 }
 
+/** Ghost sits beside the finger, floated up so the fingertip doesn't hide it. */
+function ghostTransform(x: number, y: number): string {
+  return `translate(${x + 12}px, ${y - 52}px)`;
+}
+
+/** Every folder path under `folder`, recursively (root's own '' path excluded). */
+function collectFolderPaths(folder: TreeFolder): string[] {
+  const out: string[] = [];
+  for (const child of folder.children) {
+    if (child.kind === 'folder') {
+      out.push(child.path);
+      out.push(...collectFolderPaths(child));
+    }
+  }
+  return out;
+}
+
+/**
+ * Desktop-only sort-order popup for the file-explorer header (WP8): reuses
+ * `useAnchoredMenu` + `.ctx-menu`/`.sheet__item` exactly like FileActionsSheet
+ * and NoteMenu's desktop context menus, anchored below-left of the trigger
+ * button. Lists the two `sortOrder` values from settings with a checkmark on
+ * the active one.
+ */
+function SortMenu({
+  anchor,
+  sortOrder,
+  onSelect,
+  onClose,
+}: {
+  anchor: AnchorPoint;
+  sortOrder: 'name' | 'modified';
+  onSelect: (order: 'name' | 'modified') => void;
+  onClose: () => void;
+}) {
+  const { ref, style } = useAnchoredMenu({ anchor, onClose });
+  return (
+    <div ref={ref} className="ctx-menu" role="menu" aria-label="Sort order" style={style}>
+      <button
+        className="sheet__item"
+        role="menuitemradio"
+        aria-checked={sortOrder === 'name'}
+        onClick={() => onSelect('name')}
+      >
+        <span className="row__icon">
+          <IconSort size={19} />
+        </span>
+        Name (A to Z)
+        <span style={{ flex: 1 }} />
+        {sortOrder === 'name' && <IconCheck size={14} />}
+      </button>
+      <button
+        className="sheet__item"
+        role="menuitemradio"
+        aria-checked={sortOrder === 'modified'}
+        onClick={() => onSelect('modified')}
+      >
+        <span className="row__icon">
+          <IconClock size={19} />
+        </span>
+        Recently modified
+        <span style={{ flex: 1 }} />
+        {sortOrder === 'modified' && <IconCheck size={14} />}
+      </button>
+    </div>
+  );
+}
+
 function TreeLevel({
   folder,
   depth,
   collapsed,
   onToggle,
   onLongPress,
+  onArm,
+  drag,
 }: {
   folder: TreeFolder;
   depth: number;
   collapsed: Set<string>;
   onToggle: (path: string) => void;
-  onLongPress: (node: TreeNode) => void;
+  /** x/y present only for a real desktop right-click (see ActionTarget). */
+  onLongPress: (node: TreeNode, x?: number, y?: number) => void;
+  onArm: (node: TreeNode, x: number, y: number, id: number) => void;
+  drag: TreeDrag | null;
 }) {
   const sortOrder = useSettings((s) => s.settings.sortOrder);
   const files = useVault((s) => s.files);
@@ -253,6 +558,8 @@ function TreeLevel({
             collapsed={collapsed}
             onToggle={onToggle}
             onLongPress={onLongPress}
+            onArm={onArm}
+            drag={drag}
           />
         ) : (
           <FileRow
@@ -261,6 +568,8 @@ function TreeLevel({
             depth={depth}
             active={node.path === activePath}
             onLongPress={onLongPress}
+            onArm={onArm}
+            drag={drag}
           />
         ),
       )}
@@ -268,28 +577,103 @@ function TreeLevel({
   );
 }
 
-function useLongPress(fire: () => void) {
+/**
+ * Movement past this before the 450ms hold completes reads as a scroll, so it
+ * cancels the press. Shared by folder rows (useLongPress) and file rows
+ * (usePressDrag) — fingers are never perfectly still, so a zero-tolerance
+ * cancel makes long-press feel broken.
+ */
+const PRESS_SLOP = 8;
+
+function useLongPress(fire: (x?: number, y?: number) => void) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fired = useRef(false);
+  const start = useRef({ x: 0, y: 0 });
   return {
     fired,
     handlers: {
-      onTouchStart: () => {
+      onTouchStart: (e: React.TouchEvent) => {
+        const t = e.touches[0];
+        if (t) start.current = { x: t.clientX, y: t.clientY };
         fired.current = false;
         timer.current = setTimeout(() => {
+          timer.current = null;
           fired.current = true;
-          fire();
+          fire(); // touch long-press: no pointer coords, always the sheet
         }, 450);
       },
-      onTouchMove: () => {
-        if (timer.current) clearTimeout(timer.current);
+      onTouchMove: (e: React.TouchEvent) => {
+        const t = e.touches[0];
+        if (!timer.current || !t) return;
+        if (Math.hypot(t.clientX - start.current.x, t.clientY - start.current.y) > PRESS_SLOP) {
+          clearTimeout(timer.current);
+          timer.current = null;
+        }
       },
       onTouchEnd: () => {
         if (timer.current) clearTimeout(timer.current);
+        timer.current = null;
       },
       onContextMenu: (e: React.MouseEvent) => {
         e.preventDefault();
-        fire();
+        // Real right-click: pass the pointer position through so desktop can
+        // anchor a compact context menu there instead of the bottom sheet.
+        fire(e.clientX, e.clientY);
+      },
+    },
+  };
+}
+
+/**
+ * File rows: a long-press ARMS the drag layer instead of opening the sheet
+ * outright — beginDrag then decides between release (actions sheet, the old
+ * behavior) and move (drag). Pre-arm jitter under 8px keeps the timer alive
+ * (fingers are never perfectly still); a real scroll kills it, as before.
+ * Desktop right-click skips straight to the sheet — there is no drag there.
+ */
+function usePressDrag(
+  arm: (x: number, y: number, id: number) => void,
+  sheet: (x?: number, y?: number) => void,
+) {
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fired = useRef(false);
+  const start = useRef({ x: 0, y: 0, id: -1 });
+  const touched = useRef(false);
+  return {
+    fired,
+    handlers: {
+      onTouchStart: (e: React.TouchEvent) => {
+        const t = e.touches[0];
+        touched.current = true;
+        start.current = { x: t.clientX, y: t.clientY, id: t.identifier };
+        fired.current = false;
+        timer.current = setTimeout(() => {
+          timer.current = null;
+          fired.current = true;
+          arm(start.current.x, start.current.y, start.current.id);
+        }, 450);
+      },
+      onTouchMove: (e: React.TouchEvent) => {
+        const t = e.touches[0];
+        if (!timer.current || !t) return;
+        if (Math.hypot(t.clientX - start.current.x, t.clientY - start.current.y) > PRESS_SLOP) {
+          clearTimeout(timer.current);
+          timer.current = null;
+        }
+      },
+      onTouchEnd: () => {
+        if (timer.current) clearTimeout(timer.current);
+        timer.current = null;
+      },
+      onContextMenu: (e: React.MouseEvent) => {
+        e.preventDefault();
+        // Android raises `contextmenu` from a long-press ~500ms in, racing the
+        // drag we ARM at 450ms — opening the sheet here would abort the drag
+        // ("dragging opens the options menu"). On touch the sheet is reached by
+        // arming then releasing in place (see beginDrag); only a real mouse
+        // right-click, which never fires touchstart, opens it from here.
+        if (touched.current) return;
+        sheet(e.clientX, e.clientY);
       },
     },
   };
@@ -301,21 +685,29 @@ function FolderRow({
   collapsed,
   onToggle,
   onLongPress,
+  onArm,
+  drag,
 }: {
   node: TreeFolder;
   depth: number;
   collapsed: Set<string>;
   onToggle: (path: string) => void;
-  onLongPress: (n: TreeNode) => void;
+  onLongPress: (n: TreeNode, x?: number, y?: number) => void;
+  onArm: (n: TreeNode, x: number, y: number, id: number) => void;
+  drag: TreeDrag | null;
 }) {
   const isCollapsed = collapsed.has(node.path);
-  const { handlers, fired } = useLongPress(() => onLongPress(node));
+  // Folders aren't draggable (v1) — long-press keeps opening the sheet directly.
+  const { handlers, fired } = useLongPress((x, y) => onLongPress(node, x, y));
+  // Drop target under the dragged note's finger — never its own home folder.
+  const isDrop = drag !== null && drag.target === node.path && drag.home !== node.path;
 
   return (
     <>
       <button
-        className="tree-row tree-row--folder"
+        className={isDrop ? 'tree-row tree-row--folder tree-row--drop' : 'tree-row tree-row--folder'}
         style={{ paddingLeft: 10 + depth * 18 }}
+        data-drop-folder={node.path}
         {...handlers}
         onClick={() => {
           if (!fired.current) onToggle(node.path);
@@ -335,6 +727,8 @@ function FolderRow({
           collapsed={collapsed}
           onToggle={onToggle}
           onLongPress={onLongPress}
+          onArm={onArm}
+          drag={drag}
         />
       )}
     </>
@@ -346,19 +740,31 @@ function FileRow({
   depth,
   active,
   onLongPress,
+  onArm,
+  drag,
 }: {
   node: TreeNode;
   depth: number;
   active: boolean;
-  onLongPress: (n: TreeNode) => void;
+  onLongPress: (n: TreeNode, x?: number, y?: number) => void;
+  onArm: (n: TreeNode, x: number, y: number, id: number) => void;
+  drag: TreeDrag | null;
 }) {
-  const { handlers, fired } = useLongPress(() => onLongPress(node));
+  const { handlers, fired } = usePressDrag(
+    (x, y, id) => onArm(node, x, y, id),
+    (x, y) => onLongPress(node, x, y),
+  );
   const isMd = isMarkdownPath(node.path);
   const isArtifact = isHtmlPath(node.path);
+  const classes = ['tree-row'];
+  if (active) classes.push('tree-row--active');
+  if (drag?.path === node.path) classes.push('tree-row--drag-source');
   return (
     <button
-      className={active ? 'tree-row tree-row--active' : 'tree-row'}
+      className={classes.join(' ')}
       style={{ paddingLeft: 28 + depth * 18 }}
+      // Dropping on a note reads as "into its folder" — target the parent.
+      data-drop-folder={dirname(node.path)}
       {...handlers}
       onClick={() => {
         if (fired.current) return;
@@ -549,7 +955,7 @@ function BookmarksPanel() {
   if (bookmarks.length === 0) {
     return (
       <p className="state__hint" style={{ padding: '24px 16px' }}>
-        Bookmark notes from the note menu and they'll gather here (synced with desktop Obsidian).
+        Bookmark notes from the note menu and they'll gather here (synced across your devices).
       </p>
     );
   }

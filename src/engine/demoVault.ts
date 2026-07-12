@@ -27,7 +27,7 @@ tree, synced with GitHub. No lock-in, ever.
 - [ ] Go for a run #health
 
 > [!tip] Callouts work
-> Obsidian-style callouts render natively.
+> Callouts render natively.
 
 A little code:
 
@@ -55,7 +55,7 @@ See also [[Welcome]] and ![[Projects/Basalt#Why]] embeds.
 `,
   '2026-07-02.md': `# 2026-07-02
 
-Started building **Basalt** today. Notes sync via git — see [[Projects/Basalt]].
+Started building **Basalt** today. Notes sync via git — see [[Projects/Basalt#Architecture]].
 
 - [ ] Ship the sync engine #basalt
 `,
@@ -70,7 +70,7 @@ A beautiful Android markdown vault synced with GitHub.
 
 ## Why
 
-Obsidian's feel, GitJournal's data model: plain files in a git repo.
+Plain files in a git repo — your notes stay yours.
 
 ## Architecture
 
@@ -98,7 +98,7 @@ tags: [demo]
 status: draft
 ---
 
-Everything Obsidian-flavored in one note. ==Highlights render== like this.
+Everything in one note. ==Highlights render== like this.
 %%This comment is invisible in reading view.%%
 
 Jump within this note: [[#Math]] · [[#Diagrams]].
@@ -118,7 +118,7 @@ $$\\int_0^\\infty e^{-x^2}\\,dx = \\frac{\\sqrt{\\pi}}{2}$$
 \`\`\`mermaid
 graph LR
   A[Phone] -->|push| B(GitHub)
-  B -->|pull| C[Desktop Obsidian]
+  B -->|pull| C[Desktop]
   C -->|push| B
   B -->|pull| A
 \`\`\`
@@ -134,7 +134,7 @@ An .html file in the vault renders sandboxed, scripts and all:
 
 ![[Sync Pulse.html]]
 `,
-  'Templates/Meeting.md': `# {{title}}
+  'templates/Meeting.md': `# {{title}}
 
 Date: {{date}} {{time}}
 

@@ -1,0 +1,278 @@
+/**
+ * Pure graph-model construction: turns raw vault notes + links + a GraphConfig
+ * into the abstract set of nodes and edges the canvas renders. No DOM, no
+ * services — unit-tested directly.
+ */
+import { basename, noteTitle } from '@/lib/paths';
+import type { GraphConfig, GraphGroup } from './config';
+
+export type NodeKind = 'note' | 'artifact' | 'tag' | 'attachment' | 'phantom';
+
+export interface RawNote {
+  path: string;
+  title: string;
+  tags: string[];
+  mtimeMs: number;
+  /** HTML artifact (`.html`): a first-class graph node that opens the viewer. */
+  isArtifact?: boolean;
+}
+
+/** One link out of a note, already resolved against the vault. */
+export interface RawLink {
+  from: string;
+  /** Raw target text (used as the label for unresolved/phantom targets). */
+  target: string;
+  /** Resolved vault path, or null when the target doesn't exist. */
+  resolved: string | null;
+  /** True when `resolved` points at a markdown note (vs. an attachment file). */
+  resolvedIsMarkdown: boolean;
+}
+
+export interface ModelNode {
+  id: string;
+  kind: NodeKind;
+  label: string;
+  /** Openable vault path (notes, artifacts, attachments — absent for tags/phantoms). */
+  path?: string;
+  /** For timelapse ordering; 0 for non-note nodes. */
+  mtimeMs: number;
+  /** Tags of the underlying note (used by group `tag:` matching). */
+  tags?: string[];
+  /** Group color, if any group matched. */
+  color?: string;
+}
+
+export interface ModelEdge {
+  source: string;
+  target: string;
+}
+
+export interface GraphModel {
+  nodes: ModelNode[];
+  edges: ModelEdge[];
+}
+
+function inc(map: Map<string, number>, key: string): void {
+  map.set(key, (map.get(key) ?? 0) + 1);
+}
+
+/**
+ * Does a group query match a node?
+ *   `tag:x` / `tag:#x` — note carries tag x (or a nested x/… tag)
+ *   `path:prefix`      — node's path starts with prefix
+ *   anything else      — case-insensitive substring of the node label
+ */
+export function matchesGroupQuery(
+  query: string,
+  node: Pick<ModelNode, 'label' | 'path' | 'tags'>,
+): boolean {
+  const q = query.trim();
+  if (!q) return false;
+
+  const tagM = /^tag:\s*#?(.+)$/i.exec(q);
+  if (tagM) {
+    const t = tagM[1].trim().toLowerCase();
+    if (!t) return false;
+    return (node.tags ?? []).some((x) => {
+      const l = x.toLowerCase();
+      return l === t || l.startsWith(`${t}/`);
+    });
+  }
+
+  const pathM = /^path:\s*(.+)$/i.exec(q);
+  if (pathM) {
+    const prefix = pathM[1].trim().toLowerCase();
+    if (!prefix) return false;
+    return Boolean(node.path && node.path.toLowerCase().startsWith(prefix));
+  }
+
+  return node.label.toLowerCase().includes(q.toLowerCase());
+}
+
+/** First matching group's color (first group wins), or undefined. */
+function groupColor(node: ModelNode, groups: GraphGroup[]): string | undefined {
+  for (const g of groups) {
+    if (matchesGroupQuery(g.query, node)) return g.color;
+  }
+  return undefined;
+}
+
+/**
+ * Build the node/edge set for a config. Notes always drive the graph; tags,
+ * attachments and phantom (unresolved) nodes are opt-in via filters. Group
+ * colors are applied last (first matching group wins).
+ */
+export function buildGraphModel(
+  notes: RawNote[],
+  links: RawLink[],
+  config: GraphConfig,
+): GraphModel {
+  const { filters, groups } = config;
+  const search = filters.search.trim().toLowerCase();
+
+  const noteByPath = new Map(notes.map((n) => [n.path, n]));
+
+  // Node ↔ node edges (both endpoints are graph nodes — notes or HTML
+  // artifacts — no self-links). Deduped per (source, target) to mirror the
+  // vault's Set-per-note outgoing links — a note linking the same target twice
+  // is one edge (keeps degrees/radii true). Membership in noteByPath is the gate
+  // (not `resolvedIsMarkdown`), so a note→artifact or artifact→note link forms.
+  const noteEdges: Array<[string, string]> = [];
+  const seenNoteEdge = new Set<string>();
+  for (const l of links) {
+    if (
+      l.resolved &&
+      l.resolved !== l.from &&
+      noteByPath.has(l.from) &&
+      noteByPath.has(l.resolved)
+    ) {
+      // `\n` separator, not a space: vault paths contain spaces (e.g.
+      // "Reading List.md") but never newlines, so this can't ambiguously join
+      // two different (from, resolved) pairs into one key and drop a real edge.
+      const key = `${l.from}\n${l.resolved}`;
+      if (seenNoteEdge.has(key)) continue;
+      seenNoteEdge.add(key);
+      noteEdges.push([l.from, l.resolved]);
+    }
+  }
+
+  // Orphan detection uses the full note-note degree (before search hiding).
+  const degree = new Map<string, number>();
+  for (const [a, b] of noteEdges) {
+    inc(degree, a);
+    inc(degree, b);
+  }
+
+  const visibleNotes = notes.filter((n) => {
+    if (search && !(n.title.toLowerCase().includes(search) || n.path.toLowerCase().includes(search))) {
+      return false;
+    }
+    if (!filters.orphans && (degree.get(n.path) ?? 0) === 0) return false;
+    return true;
+  });
+  const visibleNoteIds = new Set(visibleNotes.map((n) => n.path));
+
+  const nodes: ModelNode[] = visibleNotes.map((n) => ({
+    id: n.path,
+    kind: n.isArtifact ? 'artifact' : 'note',
+    label: n.title,
+    path: n.path,
+    mtimeMs: n.mtimeMs,
+    tags: n.tags,
+  }));
+  const edges: ModelEdge[] = [];
+
+  for (const [a, b] of noteEdges) {
+    if (visibleNoteIds.has(a) && visibleNoteIds.has(b)) edges.push({ source: a, target: b });
+  }
+
+  // Attachments: notes' links that resolve to a non-markdown, non-artifact file
+  // (artifacts are graph nodes in their own right — noteByPath membership skips
+  // them so they aren't double-counted as attachments).
+  if (filters.attachments) {
+    const seen = new Set<string>();
+    for (const l of links) {
+      if (
+        !l.resolved ||
+        l.resolvedIsMarkdown ||
+        noteByPath.has(l.resolved) ||
+        !visibleNoteIds.has(l.from)
+      )
+        continue;
+      if (!seen.has(l.resolved)) {
+        seen.add(l.resolved);
+        nodes.push({
+          id: l.resolved,
+          kind: 'attachment',
+          label: basename(l.resolved),
+          path: l.resolved,
+          mtimeMs: 0,
+        });
+      }
+      edges.push({ source: l.from, target: l.resolved });
+    }
+  }
+
+  // Phantoms: unresolved link targets, shown only when not restricted to existing files.
+  if (!filters.existingOnly) {
+    const seen = new Set<string>();
+    for (const l of links) {
+      if (l.resolved || !l.target.trim() || !visibleNoteIds.has(l.from)) continue;
+      const id = `phantom:${l.target.trim().toLowerCase()}`;
+      if (!seen.has(id)) {
+        seen.add(id);
+        nodes.push({ id, kind: 'phantom', label: noteTitle(l.target), mtimeMs: 0 });
+      }
+      edges.push({ source: l.from, target: id });
+    }
+  }
+
+  // Tags: one node per distinct tag among visible notes.
+  if (filters.tags) {
+    const seen = new Set<string>();
+    for (const n of visibleNotes) {
+      for (const tag of n.tags) {
+        const id = `tag:${tag.toLowerCase()}`;
+        if (!seen.has(id)) {
+          seen.add(id);
+          nodes.push({ id, kind: 'tag', label: `#${tag}`, mtimeMs: 0 });
+        }
+        edges.push({ source: n.path, target: id });
+      }
+    }
+  }
+
+  if (groups.length) {
+    for (const node of nodes) {
+      const color = groupColor(node, groups);
+      if (color) node.color = color;
+    }
+  }
+
+  // Dedupe derived edges (a note may embed the same attachment/tag twice).
+  const seenEdge = new Set<string>();
+  const uniqueEdges: ModelEdge[] = [];
+  for (const e of edges) {
+    const key = `${e.source}\n${e.target}`; // newline separator — see noteEdge dedup above
+    if (seenEdge.has(key)) continue;
+    seenEdge.add(key);
+    uniqueEdges.push(e);
+  }
+
+  return { nodes, edges: uniqueEdges };
+}
+
+/** Node ids in reveal order for the timelapse: oldest mtime first. Notes and
+ *  artifacts both carry a real mtime and drive the reveal; tags/attachments/
+ *  phantoms are derived and appear once a neighbour is revealed. */
+export function timelapseOrder(nodes: ModelNode[]): string[] {
+  return nodes
+    .filter((n) => n.kind === 'note' || n.kind === 'artifact')
+    .sort((a, b) => a.mtimeMs - b.mtimeMs || a.id.localeCompare(b.id))
+    .map((n) => n.id);
+}
+
+/**
+ * Slice of the model visible after `revealedCount` note insertions. Non-note
+ * nodes (tags/attachments/phantoms) appear once any linked note is revealed;
+ * edges appear once both endpoints are visible.
+ */
+export function timelapseSlice(model: GraphModel, revealedCount: number): GraphModel {
+  const order = timelapseOrder(model.nodes);
+  const revealed = new Set(order.slice(0, Math.max(0, revealedCount)));
+
+  const visible = new Set(revealed);
+  for (const e of model.edges) {
+    if (revealed.has(e.source)) visible.add(e.target);
+    if (revealed.has(e.target)) visible.add(e.source);
+  }
+  // A revealed set only "pulls in" derived neighbours (tags/attachments/
+  // phantoms) — never other unrevealed notes/artifacts (those wait their turn),
+  // so drop any note/artifact that isn't itself revealed.
+  const nodes = model.nodes.filter((n) =>
+    n.kind === 'note' || n.kind === 'artifact' ? revealed.has(n.id) : visible.has(n.id),
+  );
+  const nodeIds = new Set(nodes.map((n) => n.id));
+  const edges = model.edges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target));
+  return { nodes, edges };
+}

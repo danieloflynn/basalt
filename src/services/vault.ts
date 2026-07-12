@@ -7,9 +7,20 @@ import { extractTags, stripCode } from '@/lib/tags';
 import { stripInlineMarkdown } from '@/lib/plaintext';
 import { buildTree, type TreeFolder } from '@/lib/tree';
 import { extractArtifactLinks } from '@/lib/artifactLinks';
-import { dirname, isHiddenPath, isHtmlPath, isMarkdownPath, joinPath, noteTitle } from '@/lib/paths';
+import {
+  basename,
+  dirname,
+  isHiddenPath,
+  isHtmlPath,
+  isMarkdownPath,
+  joinPath,
+  normalizePath,
+  noteTitle,
+  sanitizeNoteTitle,
+} from '@/lib/paths';
+import { moveDestination } from '@/lib/movePath';
 import { LinkResolver, parseWikilinks } from '@/lib/wikilinks';
-import { rewriteWikilinks } from '@/lib/wikilinkRewrite';
+import { rewriteWikilinks, rewriteMarkdownLinks } from '@/lib/wikilinkRewrite';
 
 export interface NoteMeta {
   path: string;
@@ -29,8 +40,11 @@ export interface SearchHit {
 export interface Backlink {
   path: string;
   title: string;
-  /** Source line(s) around the mention. */
+  /** First context line — kept for the flat mobile list. */
   context: string;
+  /** One context line per link occurrence (a line linking twice appears
+   * twice), so `contexts.length` IS the real mention count per source. */
+  contexts: string[];
 }
 
 interface VaultState {
@@ -57,6 +71,49 @@ const BOOKMARKS_FILE = '.obsidian/bookmarks.json';
 
 const EXCERPT_RADIUS = 60;
 
+/** An entry in Obsidian's bookmarks.json — a file/folder/search/graph, or a nested group. */
+interface BookmarkItem {
+  type?: string;
+  path?: string;
+  items?: BookmarkItem[];
+  [key: string]: unknown;
+}
+
+/**
+ * Map every `type:'file'` bookmark path through `fn` (new path, same path, or
+ * null to drop), recursing into `type:'group'` items. Returns fresh items and
+ * whether anything changed; unknown item shapes are passed through untouched.
+ */
+function transformBookmarkItems(
+  items: BookmarkItem[],
+  fn: (path: string) => string | null,
+): { items: BookmarkItem[]; changed: boolean } {
+  let changed = false;
+  const out: BookmarkItem[] = [];
+  for (const item of items) {
+    if (item && item.type === 'file' && typeof item.path === 'string') {
+      const next = fn(item.path);
+      if (next === null) {
+        changed = true;
+        continue;
+      }
+      if (next !== item.path) {
+        changed = true;
+        out.push({ ...item, path: next });
+      } else {
+        out.push(item);
+      }
+    } else if (item && item.type === 'group' && Array.isArray(item.items)) {
+      const res = transformBookmarkItems(item.items, fn);
+      if (res.changed) changed = true;
+      out.push({ ...item, items: res.items });
+    } else {
+      out.push(item);
+    }
+  }
+  return { items: out, changed };
+}
+
 /**
  * Owns everything derived from the files on disk: folder tree, note metadata,
  * wikilink resolver, and the full-text index. All of it is a cache — the
@@ -69,8 +126,26 @@ export class VaultService {
   /** Resolved outgoing links per note; backlinks are the inverse. */
   private outgoing = new Map<string, Set<string>>();
   private backlinks = new Map<string, Set<string>>();
+  /**
+   * Serializes every mutating op (write + all structural ops) so an autosave
+   * flush can never interleave a rename's disk-move / state-rebuild — that race
+   * used to recreate the pre-rename file with zombie keystrokes. Public methods
+   * acquire the lock; private *Impl / *Plain helpers run unlocked and call each
+   * other (a reentrant public call would deadlock).
+   */
+  private queue: Promise<unknown> = Promise.resolve();
   /** Called after any local content change; wired to SyncService in services/index.ts. */
   onEdited: () => void = () => {};
+
+  /** Run `fn` after all previously-queued mutations settle; failures don't wedge the queue. */
+  private lock<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.queue.then(fn, fn);
+    this.queue = run.then(
+      () => {},
+      () => {},
+    );
+    return run;
+  }
 
   /** Live accessor so vault switching (multi-vault) swaps the FS underneath us. */
   private get fs() {
@@ -187,28 +262,42 @@ export class VaultService {
   // ------------------------------------------------------------------
 
   async writeNote(path: string, text: string): Promise<void> {
-    await this.fs.write(path, text);
-    this.contents.set(path, text);
+    return this.lock(() => this.writeNoteImpl(path, text));
+  }
+
+  private async writeNoteImpl(path: string, text: string): Promise<void> {
     const meta = this.noteMeta(path, text, Date.now());
-    // Membership must come from the index itself — the notes map is rebuilt
-    // from file listings and can say "known" for a doc the index never saw.
-    if (this.search.has(path)) this.search.replace(this.searchDoc(meta, text));
-    else this.search.add(this.searchDoc(meta, text));
+    // Update derived caches SYNCHRONOUSLY, before the (awaited) disk write, so a
+    // readNote landing mid-write never returns stale text — a remount inside the
+    // autosave window (live/source toggle, rename) used to permanently drop the
+    // in-flight keystrokes. Membership must come from the index itself: the
+    // notes map is rebuilt from listings and can say "known" for an unseen doc.
+    this.contents.set(path, text);
+    const doc = this.searchDoc(meta, text);
+    if (this.search.has(path)) this.search.replace(doc);
+    else this.search.add(doc);
     this.setOutgoing(path, text);
     useVault.setState((s) => {
       const notes = new Map(s.notes).set(path, meta);
       return { notes, indexVersion: s.indexVersion + 1 };
     });
+    await this.fs.write(path, text);
     this.onEdited();
   }
 
   /** Create a new empty note; returns the path actually used (deduped). */
   async createNote(folder: string, name?: string): Promise<string> {
-    const base = (name ?? 'Untitled').replace(/[\\/:]/g, '-').replace(/\.md$/i, '');
+    return this.lock(() => this.createNoteImpl(folder, name));
+  }
+
+  private async createNoteImpl(folder: string, name?: string): Promise<string> {
+    const base = sanitizeNoteTitle(name ?? 'Untitled');
+    // Android's FS is case-insensitive: dedupe lowercased so creating "Untitled"
+    // next to an existing "untitled.md" suffixes instead of truncating it.
+    const taken = new Set([...useVault.getState().notes.keys()].map((p) => p.toLowerCase()));
     let candidate = joinPath(folder, `${base}.md`);
     let n = 2;
-    const { notes } = useVault.getState();
-    while (notes.has(candidate)) {
+    while (taken.has(candidate.toLowerCase())) {
       candidate = joinPath(folder, `${base} ${n}.md`);
       n++;
     }
@@ -217,53 +306,133 @@ export class VaultService {
     this.resolver.add(candidate);
     // Index now — every later search op (autosave replace, rename discard)
     // assumes markdown files are present in the index.
-    this.search.add(this.searchDoc(this.noteMeta(candidate, '', Date.now()), ''));
+    const doc = this.searchDoc(this.noteMeta(candidate, '', Date.now()), '');
+    if (this.search.has(candidate)) this.search.replace(doc);
+    else this.search.add(doc);
     await this.afterStructuralChange();
     return candidate;
   }
 
   async deleteFile(path: string): Promise<void> {
+    return this.lock(() => this.deleteFileImpl(path));
+  }
+
+  private async deleteFileImpl(path: string): Promise<void> {
     await this.fs.remove(path);
     this.contents.delete(path);
     this.resolver.remove(path);
-    if (this.search.has(path)) {
-      this.search.discard(path);
-    }
+    if (this.search.has(path)) this.search.discard(path);
     useVault.setState((s) => ({ recents: s.recents.filter((p) => p !== path) }));
+    await this.removeBookmark(path);
     await this.afterStructuralChange();
   }
 
   async renameFile(from: string, to: string): Promise<void> {
+    return this.lock(async () => {
+      await this.renameFilePlain(from, to);
+      await this.afterStructuralChange();
+    });
+  }
+
+  /**
+   * Low-level single-file rename: fs move + cache/resolver/search/recents fixup.
+   * NO afterStructuralChange (callers batch it) and NO lock (callers hold it).
+   * Guards against overwriting an existing destination BEFORE touching disk —
+   * an unguarded rename onto a live path destroyed that note and corrupted the
+   * index. A case-only rename (Foo -> foo) is allowed (same underlying file).
+   */
+  private async renameFilePlain(from: string, to: string): Promise<void> {
+    if (
+      to !== from &&
+      useVault
+        .getState()
+        .files.some((f) => f.path !== from && f.path.toLowerCase() === to.toLowerCase())
+    ) {
+      throw new Error(`Cannot rename ${from} -> ${to}: destination already exists`);
+    }
     await this.fs.rename(from, to);
     const text = this.contents.get(from);
     this.contents.delete(from);
-    this.resolver.remove(from);
-    this.resolver.add(to);
+    if (!isHiddenPath(from)) this.resolver.remove(from);
+    if (!isHiddenPath(to)) this.resolver.add(to);
     if (text !== undefined) this.contents.set(to, text);
     if (isMarkdownPath(from) && this.search.has(from)) this.search.discard(from);
     if (isMarkdownPath(to)) {
       const t = text ?? (await this.fs.read(to));
-      this.search.add(this.searchDoc(this.noteMeta(to, t, Date.now()), t));
+      const doc = this.searchDoc(this.noteMeta(to, t, Date.now()), t);
+      if (this.search.has(to)) this.search.replace(doc);
+      else this.search.add(doc);
     }
     useVault.setState((s) => ({
       recents: s.recents.map((p) => (p === from ? to : p)),
     }));
-    await this.afterStructuralChange();
+  }
+
+  /**
+   * Repoint inbound `[[wikilinks]]` AND `[text](markdown links)` that resolve to
+   * `oldPath`, across every source note, BEFORE the file moves on disk (while
+   * the resolver still knows the old path). Each rewritten source is persisted
+   * with writeNoteImpl (which reindexes it); the final afterStructuralChange
+   * rebuilds the link graph.
+   */
+  private async repointLinks(opts: {
+    oldPath: string;
+    /** Wikilink base to substitute: noteTitle for notes, basename for attachments. */
+    newBase: string;
+    /** Markdown-link name to substitute: basename WITH extension. */
+    newName: string;
+    /** '' = vault root; undefined = rename-in-place (preserve each link's folder). */
+    newDir?: string;
+    shouldRewrite: (target: string, src: string) => boolean;
+    qualifyBare?: (target: string, src: string) => string | null | undefined;
+  }): Promise<void> {
+    for (const [src, text] of [...this.contents]) {
+      if (!isMarkdownPath(src) || isHiddenPath(src)) continue;
+      let next = rewriteWikilinks(text, {
+        newBase: opts.newBase,
+        newDir: opts.newDir,
+        shouldRewrite: (t) => opts.shouldRewrite(t, src),
+        qualifyBare: opts.qualifyBare ? (t) => opts.qualifyBare!(t, src) : undefined,
+      });
+      next = rewriteMarkdownLinks(next, {
+        newName: opts.newName,
+        newDir: opts.newDir,
+        shouldRewrite: (dp) => opts.shouldRewrite(dp, src),
+        qualifyBare: opts.qualifyBare ? (dp) => opts.qualifyBare!(dp, src) : undefined,
+      });
+      if (next !== text) await this.writeNoteImpl(src, next);
+    }
+  }
+
+  /** A resolver reflecting the vault AFTER `from` becomes `to` (bare-name ambiguity checks). */
+  private projectedResolver(from: string, to: string): LinkResolver {
+    const paths = useVault
+      .getState()
+      .files.map((f) => f.path)
+      .filter((p) => !isHiddenPath(p) && p !== from);
+    paths.push(to);
+    return new LinkResolver(paths);
   }
 
   /**
    * Rename a note from a user-typed title (the "inline title IS the filename"
    * model). Returns the path actually used — equal to `path` for a no-op.
-   * Sanitizes/dedupes like createNote, rewrites inbound wikilinks so no link is
-   * orphaned, and migrates note-path stores (recents via renameFile, bookmarks).
+   * Sanitizes/dedupes like createNote, rewrites inbound links so nothing is
+   * orphaned, and migrates note-path stores (recents, bookmarks).
    */
   async renameByTitle(path: string, rawTitle: string): Promise<string> {
+    return this.lock(() => this.renameByTitleImpl(path, rawTitle));
+  }
+
+  private async renameByTitleImpl(path: string, rawTitle: string): Promise<string> {
     const folder = dirname(path);
     const currentBase = noteTitle(path);
-    // Same char policy as createNote (strip a typed .md, [\/:] -> '-'), trimmed.
-    const base = rawTitle.trim().replace(/\.md$/i, '').replace(/[\\/:]/g, '-').trim();
-    // No-op: nothing typed, or unchanged — no fs call, no sync queued.
-    if (!base || base === currentBase) return path;
+    // Nothing typed -> no-op (keep the current name); otherwise sanitize so a
+    // trap title (`A|B`, `]]`, `#`, `.`, `.draft`) can never corrupt vault text
+    // or produce a hidden path that swallows the note and its autosaves.
+    if (!rawTitle.trim()) return path;
+    const base = sanitizeNoteTitle(rawTitle);
+    if (base === currentBase) return path;
 
     // Dedupe against existing notes; Android's FS is case-insensitive, so
     // compare lowercased — but exclude ourselves so a deliberate case-only
@@ -280,57 +449,200 @@ export class VaultService {
     const to = joinPath(folder, `${candidate}.md`);
     if (to === path) return path;
 
-    // Repoint links BEFORE the rename, while the resolver still knows the old
-    // path (afterwards "Old" would no longer resolve to this note). writeNote
-    // reindexes each source; the final rebuild in renameFile fixes the graph.
+    // Repoint links while the resolver still knows the old path. Rename in place
+    // preserves each link's written folder; but if a bare `[[New]]` would now be
+    // captured by a same-named note ELSEWHERE, qualify it with this note's folder.
     const newBase = noteTitle(to);
-    for (const [src, text] of this.contents) {
-      if (!isMarkdownPath(src) || isHiddenPath(src)) continue;
-      const rewritten = rewriteWikilinks(text, {
-        newBase,
-        shouldRewrite: (target) => this.resolver.resolve(target, src) === path,
-      });
-      if (rewritten !== text) await this.writeNote(src, rewritten);
-    }
+    const projected = this.projectedResolver(path, to);
+    await this.repointLinks({
+      oldPath: path,
+      newBase,
+      newName: basename(to),
+      shouldRewrite: (target, src) => this.resolver.resolve(target, src) === path,
+      qualifyBare: (_target, src) => (projected.resolve(newBase, src) === to ? null : folder),
+    });
 
-    await this.renameFile(path, to);
+    await this.renameFilePlain(path, to);
     await this.migrateBookmark(path, to);
+    await this.afterStructuralChange();
     return to;
   }
 
-  async createFolder(path: string): Promise<void> {
-    // Git doesn't track empty dirs — drop a .gitkeep so the folder syncs.
-    await this.fs.mkdir(path);
-    await this.fs.write(joinPath(path, '.gitkeep'), '');
+  /**
+   * Move a file into another folder: same basename, deduped with the " 2"
+   * suffix rule when the target name is taken. Inbound FOLDER-QUALIFIED links
+   * (`[[Old/Note]]`, `[x](Old/Note.md)`) are repointed at the new folder before
+   * the rename — they break on a move, while bare `[[Note]]` links keep resolving
+   * by basename and are left as written UNLESS the move makes them resolve to a
+   * different same-named note (then they're folder-qualified). Returns the path
+   * actually used — equal to `path` for a no-op; the caller repoints nav history.
+   */
+  async moveFile(path: string, toFolder: string): Promise<string> {
+    return this.lock(() => this.moveFileImpl(path, toFolder));
+  }
+
+  private async moveFileImpl(path: string, toFolder: string): Promise<string> {
+    const folder = normalizePath(toFolder);
+    if (folder === dirname(path)) return path;
+
+    // Android's FS is case-insensitive, so dedupe compares lowercased (as in
+    // renameByTitle); our own path never blocks the move.
+    const taken = new Set(
+      useVault
+        .getState()
+        .files.map((f) => f.path.toLowerCase())
+        .filter((p) => p !== path.toLowerCase()),
+    );
+    const to = moveDestination(path, folder, (c) => taken.has(c.toLowerCase()));
+    if (to === path) return path;
+
+    const newBase = isMarkdownPath(to) ? noteTitle(to) : basename(to);
+    const oldBase = isMarkdownPath(path) ? noteTitle(path) : basename(path);
+    const baseChanged = newBase.toLowerCase() !== oldBase.toLowerCase();
+    const projected = this.projectedResolver(path, to);
+    await this.repointLinks({
+      oldPath: path,
+      newBase,
+      newName: basename(to),
+      newDir: folder,
+      shouldRewrite: (target, src) => {
+        if (this.resolver.resolve(target, src) !== path) return false;
+        if (target.includes('/') || baseChanged) return true;
+        // Bare link, unchanged base: only rewrite (folder-qualify) when leaving
+        // it bare would now resolve to a DIFFERENT same-named note.
+        return folder !== '' && projected.resolve(newBase, src) !== to;
+      },
+    });
+
+    await this.renameFilePlain(path, to);
+    await this.migrateBookmark(path, to);
     await this.afterStructuralChange();
+    return to;
+  }
+
+  /**
+   * Rename a folder in place. Dedupes the new name against siblings (case-
+   * insensitively), enumerates ALL children from the FS listing (the tree hides
+   * dotfiles — a stray `.gitkeep` left behind keeps the old folder alive),
+   * rewrites inbound folder-qualified links for every child BEFORE any rename
+   * (while the resolver still knows the old paths), then moves the files and
+   * migrates bookmarks/recents. Returns every {from, to} so the caller can
+   * repoint nav history.
+   */
+  async renameFolder(path: string, newName: string): Promise<Array<{ from: string; to: string }>> {
+    return this.lock(() => this.renameFolderImpl(path, newName));
+  }
+
+  private async renameFolderImpl(
+    path: string,
+    newName: string,
+  ): Promise<Array<{ from: string; to: string }>> {
+    const parent = dirname(path);
+    const currentName = basename(path);
+    const prefix = `${path}/`;
+
+    const allPaths = (await this.fs.list()).map((f) => f.path);
+    const childPaths = allPaths.filter((p) => p.startsWith(prefix));
+
+    // Dedupe the new folder name against sibling folders, case-insensitively.
+    const parentPrefix = parent ? `${parent}/` : '';
+    const siblings = new Set<string>();
+    for (const p of allPaths) {
+      if (parentPrefix && !p.startsWith(parentPrefix)) continue;
+      const rest = p.slice(parentPrefix.length);
+      const slash = rest.indexOf('/');
+      if (slash === -1) continue;
+      siblings.add(rest.slice(0, slash).toLowerCase());
+    }
+    siblings.delete(currentName.toLowerCase());
+    let finalName = newName;
+    let n = 2;
+    while (siblings.has(finalName.toLowerCase())) {
+      finalName = `${newName} ${n}`;
+      n++;
+    }
+    const to = parent ? joinPath(parent, finalName) : finalName;
+    if (to === path) return [];
+
+    const newPrefix = `${to}/`;
+    const moves = childPaths.map((from) => ({ from, to: newPrefix + from.slice(prefix.length) }));
+
+    // Repoint inbound links for every linkable child, while the resolver still
+    // knows the old paths. Only folder-qualified links break on a folder move;
+    // bare links keep resolving by basename, so leave them.
+    for (const { from, to: childTo } of moves) {
+      if (isHiddenPath(from)) continue;
+      const isMd = isMarkdownPath(from);
+      await this.repointLinks({
+        oldPath: from,
+        newBase: isMd ? noteTitle(from) : basename(from),
+        newName: basename(from),
+        newDir: dirname(childTo),
+        shouldRewrite: (target, src) =>
+          target.includes('/') && this.resolver.resolve(target, src) === from,
+      });
+    }
+
+    for (const { from, to: childTo } of moves) {
+      await this.renameFilePlain(from, childTo);
+      await this.migrateBookmark(from, childTo);
+    }
+    await this.afterStructuralChange();
+    return moves;
+  }
+
+  async createFolder(path: string): Promise<void> {
+    return this.lock(async () => {
+      // Git doesn't track empty dirs — drop a .gitkeep so the folder syncs.
+      await this.fs.mkdir(path);
+      await this.fs.write(joinPath(path, '.gitkeep'), '');
+      await this.afterStructuralChange();
+    });
   }
 
   async deleteFolder(path: string): Promise<void> {
-    await this.fs.rmdir(path);
+    return this.lock(() => this.deleteFolderImpl(path));
+  }
+
+  private async deleteFolderImpl(path: string): Promise<void> {
     const prefix = `${path}/`;
-    for (const p of [...this.contents.keys()]) {
-      if (p.startsWith(prefix)) {
-        this.contents.delete(p);
-        this.resolver.remove(p);
-        if (isMarkdownPath(p) && this.search.has(p)) this.search.discard(p);
-      }
-    }
+    // Purge EVERY child from the caches — including non-markdown attachments,
+    // which never sat in `contents` and so used to linger in the resolver as
+    // stale embed targets.
+    const affected = useVault
+      .getState()
+      .files.map((f) => f.path)
+      .filter((p) => p === path || p.startsWith(prefix));
+    await this.fs.rmdir(path);
+    const purge = (p: string) => {
+      this.contents.delete(p);
+      this.resolver.remove(p);
+      if (isMarkdownPath(p) && this.search.has(p)) this.search.discard(p);
+    };
+    for (const p of affected) purge(p);
+    for (const p of [...this.contents.keys()]) if (p.startsWith(prefix)) purge(p);
+    useVault.setState((s) => ({
+      recents: s.recents.filter((p) => !(p === path || p.startsWith(prefix))),
+    }));
+    await this.applyBookmarkTransform((p) => (p === path || p.startsWith(prefix) ? null : p));
     await this.afterStructuralChange();
   }
 
   async saveAttachment(folder: string, fileName: string, base64: string): Promise<string> {
-    let candidate = joinPath(folder, fileName);
-    let n = 2;
-    const existing = new Set(useVault.getState().files.map((f) => f.path));
-    while (existing.has(candidate)) {
-      const dot = fileName.lastIndexOf('.');
-      const stem = dot === -1 ? fileName : fileName.slice(0, dot);
-      const ext = dot === -1 ? '' : fileName.slice(dot);
-      candidate = joinPath(folder, `${stem} ${n}${ext}`);
-      n++;
-    }
+    return this.lock(() => this.saveAttachmentImpl(folder, fileName, base64));
+  }
+
+  private async saveAttachmentImpl(
+    folder: string,
+    fileName: string,
+    base64: string,
+  ): Promise<string> {
+    // Dedupe case-insensitively (Android FS) via the shared movePath helper, so
+    // an upload never truncates a differently-cased existing attachment.
+    const taken = new Set(useVault.getState().files.map((f) => f.path.toLowerCase()));
+    const candidate = moveDestination(fileName, folder, (c) => taken.has(c.toLowerCase()));
     await this.fs.writeBinary(candidate, base64);
-    this.resolver.add(candidate);
+    if (!isHiddenPath(candidate)) this.resolver.add(candidate);
     await this.afterStructuralChange();
     return candidate;
   }
@@ -415,13 +727,44 @@ export class VaultService {
     const title = noteTitle(path).toLowerCase();
     return [...sources].sort().map((src) => {
       const text = this.contents.get(src) ?? '';
-      const line =
-        text
-          .split('\n')
-          .find((l) => l.toLowerCase().includes(`[[${title}`) || l.toLowerCase().includes(title)) ??
-        '';
-      return { path: src, title: noteTitle(src), context: line.trim().slice(0, 160) };
+      const lines = text.split('\n');
+      // One context per link occurrence, in document order — a line linking
+      // twice is listed twice, so contexts.length is the true mention count.
+      const contexts: string[] = [];
+      for (const l of lines) {
+        const n = this.lineLinkCount(l, src, path);
+        for (let i = 0; i < n; i++) contexts.push(l.trim().slice(0, 160));
+      }
+      if (contexts.length === 0) {
+        // No line resolves individually (e.g. an artifact's <a href> edge) —
+        // fall back to the first line naming the note, as before. Never a bare
+        // substring pick for short titles: the link-count pass above already
+        // caught every resolvable line.
+        const line = lines.find((l) => l.toLowerCase().includes(title)) ?? '';
+        contexts.push(line.trim().slice(0, 160));
+      }
+      return { path: src, title: noteTitle(src), context: contexts[0], contexts };
     });
+  }
+
+  /** How many wikilinks / markdown links on this single line resolve to `target`? */
+  private lineLinkCount(line: string, src: string, target: string): number {
+    let n = 0;
+    for (const lk of parseWikilinks(line)) {
+      if (this.resolver.resolve(lk.target, src) === target) n++;
+    }
+    for (const m of line.matchAll(/\]\(([^)\s]+)\)/g)) {
+      const href = m[1];
+      if (/^[a-z][a-z0-9+.-]*:/i.test(href)) continue;
+      try {
+        if (this.resolver.resolve(decodeURIComponent(href.replace(/^\.\//, '')), src) === target) {
+          n++;
+        }
+      } catch {
+        // malformed percent-encoding — ignore this candidate
+      }
+    }
+    return n;
   }
 
   outgoingOf(path: string): string[] {
@@ -511,13 +854,41 @@ export class VaultService {
     await this.writeBookmarks(next);
   }
 
-  /** Follow a rename in the bookmarks store + synced .obsidian/bookmarks.json. */
+  /** Follow a rename in the synced bookmarks (recursing into Obsidian groups). */
   private async migrateBookmark(from: string, to: string): Promise<void> {
-    const { bookmarks } = useVault.getState();
-    if (!bookmarks.includes(from)) return;
-    const next = bookmarks.map((p) => (p === from ? to : p));
-    useVault.setState({ bookmarks: next });
-    await this.writeBookmarks(next);
+    await this.applyBookmarkTransform((p) => (p === from ? to : p));
+  }
+
+  /** Drop a dangling file bookmark on delete (recursing into groups). */
+  private async removeBookmark(path: string): Promise<void> {
+    await this.applyBookmarkTransform((p) => (p === path ? null : p));
+  }
+
+  /**
+   * Apply `fn` to every `type:'file'` bookmark path in .obsidian/bookmarks.json,
+   * recursing into `type:'group'` items. `fn` returns the new path, the same
+   * path (unchanged), or null to drop the item. Rewrites the file and refreshes
+   * the flattened top-level `bookmarks` state only when something changed.
+   */
+  private async applyBookmarkTransform(fn: (path: string) => string | null): Promise<void> {
+    let parsed: { items?: unknown[] } | null = null;
+    try {
+      parsed = JSON.parse(await this.fs.read(BOOKMARKS_FILE)) as { items?: unknown[] };
+    } catch {
+      return; // no bookmarks file
+    }
+    const items = Array.isArray(parsed?.items) ? (parsed.items as BookmarkItem[]) : [];
+    const result = transformBookmarkItems(items, fn);
+    if (!result.changed) return;
+    await this.fs.write(
+      BOOKMARKS_FILE,
+      JSON.stringify({ ...parsed, items: result.items }, null, 2),
+    );
+    const topLevel = result.items
+      .filter((i) => i.type === 'file' && typeof i.path === 'string')
+      .map((i) => i.path as string);
+    useVault.setState({ bookmarks: topLevel });
+    this.onEdited();
   }
 
   private async writeBookmarks(paths: string[]): Promise<void> {

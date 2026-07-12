@@ -1,9 +1,18 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { getGitEngine, setVaultDir } from '@/engine';
-import { syncService, useSettings, useSync, vaultService, type VaultInfo } from '@/services';
+import {
+  activeVaultIsLocal,
+  syncService,
+  useSettings,
+  useSync,
+  vaultService,
+  type VaultInfo,
+} from '@/services';
 import { useNav } from '@/state/nav';
+import { deviceNoun } from '@/lib/device';
 import { timeAgo } from '@/ui/components/SyncStatus';
 import { Dialog } from '@/ui/components/Dialog';
+import { HotkeySettings } from '@/ui/components/HotkeySettings';
 import { OnboardingScreen } from '@/ui/screens/OnboardingScreen';
 import { IconBack, IconChevronRight, IconGit, IconHistory, IconPlus } from '@/ui/icons';
 
@@ -70,7 +79,10 @@ export function SettingsScreen() {
                     )}
                   </p>
                   <p className="setting__desc">
-                    {v.repoUrl.replace(/^https:\/\/github\.com\//, '').replace(/\.git$/, '')} · {v.branch}
+                    {v.repoUrl
+                      ? `${v.repoUrl.replace(/^https:\/\/github\.com\//, '').replace(/\.git$/, '')} · ${v.branch}`
+                      : v.dir}
+                    {v.mode === 'local' ? ' · local only' : ''}
                     {v.dir === settings.activeVault && lastSyncAt
                       ? ` · synced ${timeAgo(lastSyncAt)}${pendingCount > 0 ? ` · ${pendingCount} pending` : ''}`
                       : ''}
@@ -91,7 +103,7 @@ export function SettingsScreen() {
               </span>
               <div className="setting__body">
                 <p className="setting__label">Add vault</p>
-                <p className="setting__desc">Clone another repository to this phone</p>
+                <p className="setting__desc">Clone another repository to this {deviceNoun()}</p>
               </div>
             </button>
             <button className="setting" onClick={() => nav.push({ name: 'history' })}>
@@ -115,6 +127,19 @@ export function SettingsScreen() {
 
         <div className="group">
           <p className="group__label">Sync</p>
+          {activeVaultIsLocal(settings) ? (
+            <div className="card">
+              <div className="setting">
+                <div className="setting__body">
+                  <p className="setting__label">Local-only vault</p>
+                  <p className="setting__desc">
+                    Basalt edits this folder's files directly and never touches git — there is
+                    nothing to sync.
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : (
           <div className="card">
             <ToggleSetting
               label="Sync when app opens"
@@ -132,7 +157,7 @@ export function SettingsScreen() {
               value={settings.autoPushDebounceSec}
               desc={
                 settings.autoPushDebounceSec === null
-                  ? 'Changes wait until you tap sync'
+                  ? 'Changes wait until you sync manually'
                   : `Changes push ~${settings.autoPushDebounceSec === 30 ? '30 seconds' : '5 minutes'} after you stop typing`
               }
               onChange={(v) => {
@@ -153,6 +178,7 @@ export function SettingsScreen() {
               }}
             />
           </div>
+          )}
         </div>
 
         <div className="group">
@@ -168,6 +194,50 @@ export function SettingsScreen() {
               value={settings.editorMode}
               onChange={(v) => void update({ editorMode: v })}
             />
+            <ToggleSetting
+              label="Move checked items down"
+              desc="Checking off a task moves it below the unchecked items in its list"
+              value={settings.sortCheckedToBottom}
+              onChange={(v) => void update({ sortCheckedToBottom: v })}
+            />
+          </div>
+        </div>
+
+        <div className="group">
+          <p className="group__label">Templates</p>
+          <div className="card">
+            <TextSetting
+              label="Template folder location"
+              desc="Where your template notes live. The command palette's Insert template and New note from template actions list the markdown notes in this folder."
+              value={settings.templateFolder}
+              placeholder="templates"
+              onCommit={(v) => void update({ templateFolder: v.trim() })}
+            />
+          </div>
+        </div>
+
+        <div className="group">
+          <p className="group__label">New notes</p>
+          <div className="card">
+            <ChoiceSetting
+              label="Default location for new notes"
+              desc="Where a note lands when it's created without a folder — the bottom-bar New note button and the quick switcher's Create action."
+              options={[
+                { label: 'Vault root', value: 'root' as const },
+                { label: 'Folder', value: 'folder' as const },
+              ]}
+              value={settings.newNoteLocation}
+              onChange={(v) => void update({ newNoteLocation: v })}
+            />
+            {settings.newNoteLocation === 'folder' && (
+              <TextSetting
+                label="New note folder"
+                desc="Vault-relative folder, e.g. Daily or Inbox. Leave blank for the vault root."
+                value={settings.newNoteFolderPath}
+                placeholder="Inbox"
+                onCommit={(v) => void update({ newNoteFolderPath: v.trim() })}
+              />
+            )}
           </div>
         </div>
 
@@ -195,6 +265,11 @@ export function SettingsScreen() {
               onChange={(v) => void update({ fontScale: v })}
             />
           </div>
+        </div>
+
+        <div className="group">
+          <p className="group__label">Hotkeys</p>
+          <HotkeySettings />
         </div>
 
         <p
@@ -231,7 +306,13 @@ export function SettingsScreen() {
       {removing && (
         <Dialog
           title={`Remove "${removing.name}"?`}
-          message="Un-synced local changes in this vault will be lost. Everything already pushed is safe on GitHub."
+          message={
+            // Opened folders stay on disk — Basalt only forgets them. Managed
+            // clones are really deleted from the app's storage.
+            removing.dir.startsWith('/')
+              ? 'The folder and its files stay on disk — Basalt just stops opening it.'
+              : 'Un-synced local changes in this vault will be lost. Everything already pushed is safe on GitHub.'
+          }
           confirmLabel="Remove"
           danger
           onCancel={() => setRemoving(null)}
@@ -290,6 +371,50 @@ function ToggleSetting({
         aria-checked={value}
         aria-label={label}
         onClick={() => onChange(!value)}
+      />
+    </div>
+  );
+}
+
+function TextSetting({
+  label,
+  desc,
+  value,
+  placeholder,
+  onCommit,
+}: {
+  label: string;
+  desc?: string;
+  value: string;
+  placeholder?: string;
+  onCommit: (v: string) => void;
+}) {
+  // Local draft so typing doesn't churn the store / re-persist every keystroke;
+  // commit on blur or Enter. Re-seed when the persisted value changes elsewhere.
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+  const commit = () => {
+    if (draft !== value) onCommit(draft);
+  };
+  return (
+    <div className="setting" style={{ flexWrap: 'wrap', gap: 8 }}>
+      <div className="setting__body" style={{ flexBasis: '100%' }}>
+        <p className="setting__label">{label}</p>
+        {desc && <p className="setting__desc">{desc}</p>}
+      </div>
+      <input
+        className="dialog__input"
+        style={{ flexBasis: '100%' }}
+        value={draft}
+        placeholder={placeholder}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') e.currentTarget.blur();
+        }}
+        autoCapitalize="none"
+        autoCorrect="off"
+        spellCheck={false}
       />
     </div>
   );

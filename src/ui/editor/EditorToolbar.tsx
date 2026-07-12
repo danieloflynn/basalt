@@ -1,5 +1,6 @@
 import { indentLess, indentMore, redo, undo } from '@codemirror/commands';
 import { openSearchPanel } from '@codemirror/search';
+import type { Line } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { useRef } from 'react';
 import { showSoftKeyboard } from '@/lib/keyboard';
@@ -42,6 +43,13 @@ export function EditorToolbar({ viewRef }: { viewRef: React.RefObject<EditorView
     if (!v) return;
     fn(v);
     v.focus();
+  };
+
+  // Like `act`, but does NOT refocus the document afterwards — for commands that
+  // move focus elsewhere on purpose (e.g. the find panel's search input).
+  const actKeepFocus = (fn: (v: EditorView) => void) => () => {
+    const v = viewRef.current;
+    if (v) fn(v);
   };
 
   // The picked file rides through vaultService.saveAttachment, then an embed is
@@ -120,26 +128,30 @@ export function EditorToolbar({ viewRef }: { viewRef: React.RefObject<EditorView
         >
           <IconCode size={20} />
         </button>
-        <button className="iconbtn" aria-label="Quote" onClick={act((v) => togglePrefix(v, '> '))}>
+        <button className="iconbtn" aria-label="Quote" onClick={act(toggleQuote)}>
           <IconQuote size={20} />
         </button>
         <button className="iconbtn" aria-label="Link" onClick={act(insertMarkdownLink)}>
           <IconLink size={20} />
         </button>
-        <button className="iconbtn" aria-label="List" onClick={act((v) => togglePrefix(v, '- '))}>
+        <button
+          className="iconbtn"
+          aria-label="List"
+          onClick={act((v) => toggleListFamily(v, 'bullet'))}
+        >
           <IconList size={20} />
         </button>
         <button
           className="iconbtn"
           aria-label="Numbered list"
-          onClick={act((v) => togglePrefix(v, '1. '))}
+          onClick={act((v) => toggleListFamily(v, 'numbered'))}
         >
           <IconListNumbered size={20} />
         </button>
         <button
           className="iconbtn"
           aria-label="Task"
-          onClick={act((v) => togglePrefix(v, '- [ ] '))}
+          onClick={act((v) => toggleListFamily(v, 'task'))}
         >
           <IconTodo size={20} />
         </button>
@@ -152,7 +164,11 @@ export function EditorToolbar({ viewRef }: { viewRef: React.RefObject<EditorView
 
         {/* Basalt extras (Obsidian's config wrench has no analogue here). */}
         <span className="editor-toolbar__sep" />
-        <button className="iconbtn" aria-label="Find and replace" onClick={act(openSearchPanel)}>
+        <button
+          className="iconbtn"
+          aria-label="Find and replace"
+          onClick={actKeepFocus(openSearchPanel)}
+        >
           <IconSearch size={20} />
         </button>
         <button
@@ -187,14 +203,24 @@ function readAsBase64(file: File): Promise<string> {
 // Formatting commands
 // ---------------------------------------------------------------------------
 
-function wrapSelection(view: EditorView, marker: string): void {
+export function wrapSelection(view: EditorView, marker: string): void {
   const { from, to } = view.state.selection.main;
   const selected = view.state.sliceDoc(from, to);
   const n = marker.length;
+  const markerChar = marker[0];
   const before = view.state.sliceDoc(Math.max(0, from - n), from);
   const after = view.state.sliceDoc(to, to + n);
 
-  if (before === marker && after === marker) {
+  // Unwrap ONLY when the run of marker characters on each side is EXACTLY the
+  // marker — not part of a longer run. Otherwise italic (`*`) next to bold
+  // (`**`) would strip one `*` off each side and destroy the bold. Requiring an
+  // exact run lets shared-character markers compose instead: **text** + italic
+  // → ***text*** (the `**` is a 2-run, ≠ the 1-char italic marker, so we wrap).
+  const beforeExact =
+    before === marker && view.state.sliceDoc(Math.max(0, from - n - 1), from - n) !== markerChar;
+  const afterExact = after === marker && view.state.sliceDoc(to + n, to + n + 1) !== markerChar;
+
+  if (beforeExact && afterExact) {
     view.dispatch({
       changes: [
         { from: from - n, to: from, insert: '' },
@@ -215,7 +241,7 @@ function lineRange(view: EditorView) {
   return view.state.doc.lineAt(from);
 }
 
-function cycleHeading(view: EditorView): void {
+export function cycleHeading(view: EditorView): void {
   const line = lineRange(view);
   const m = /^(#{1,6})\s/.exec(line.text);
   let next: string;
@@ -228,14 +254,158 @@ function cycleHeading(view: EditorView): void {
   });
 }
 
-function togglePrefix(view: EditorView, prefix: string): void {
-  const line = lineRange(view);
-  const has = line.text.startsWith(prefix);
-  const next = has ? line.text.slice(prefix.length) : `${prefix}${line.text}`;
-  view.dispatch({
-    changes: { from: line.from, to: line.to, insert: next },
-    selection: { anchor: line.from + next.length },
-  });
+// ---------------------------------------------------------------------------
+// List / quote toggles — family-aware (Obsidian behaviour) and multi-line.
+// ---------------------------------------------------------------------------
+
+type LineKind = 'plain' | 'bullet' | 'numbered' | 'task';
+export type ListFamily = 'bullet' | 'numbered' | 'task';
+
+interface ParsedLine {
+  indent: string;
+  kind: LineKind;
+  /** Task checkbox state (only meaningful when kind === 'task'). */
+  checked: boolean;
+  /** Text after the list marker (or the whole line, minus indent, when plain). */
+  content: string;
+}
+
+/** Classify a line as bullet / numbered / task / plain, splitting off the marker. */
+export function parseListLine(text: string): ParsedLine {
+  let m: RegExpExecArray | null;
+  // Task first (a task is also a bullet). Allow `- [ ]` at EOL (no trailing text).
+  if ((m = /^([ \t]*)[-*+][ \t]+\[([ xX])\][ \t]*(.*)$/.exec(text))) {
+    return { indent: m[1], kind: 'task', checked: m[2] !== ' ', content: m[3] };
+  }
+  if ((m = /^([ \t]*)[-*+][ \t]+(.*)$/.exec(text))) {
+    return { indent: m[1], kind: 'bullet', checked: false, content: m[2] };
+  }
+  if ((m = /^([ \t]*)\d+[.)][ \t]+(.*)$/.exec(text))) {
+    return { indent: m[1], kind: 'numbered', checked: false, content: m[2] };
+  }
+  m = /^([ \t]*)(.*)$/.exec(text) as RegExpExecArray;
+  return { indent: m[1], kind: 'plain', checked: false, content: m[2] };
+}
+
+/** Render a parsed line's marker prefix as the target family (ordinal only used for numbered). */
+function renderPrefix(p: ParsedLine, target: LineKind, ordinal: number): string {
+  switch (target) {
+    case 'bullet':
+      return `${p.indent}- `;
+    case 'task':
+      return `${p.indent}- [${p.checked ? 'x' : ' '}] `;
+    case 'numbered':
+      return `${p.indent}${ordinal}. `;
+    case 'plain':
+      return p.indent;
+  }
+}
+
+/**
+ * Toggle a list family over every selected line (Obsidian behaviour):
+ *  - if EVERY non-blank selected line is already the target family → toggle it
+ *    off (back to plain);
+ *  - otherwise convert each line TO the target, cleanly replacing whatever
+ *    marker it had (numbered ⇄ bullet ⇄ task; task ⇄ bullet swaps the `[ ]`);
+ *  - numbered lists are resequenced across the whole contiguous ordered run we
+ *    touch, so numbers stay 1..n.
+ */
+export function toggleListFamily(view: EditorView, target: ListFamily): void {
+  const { doc } = view.state;
+  const range = view.state.selection.main;
+  const firstNum = doc.lineAt(range.from).number;
+  const lastNum = doc.lineAt(range.to).number;
+
+  const selected: Line[] = [];
+  for (let n = firstNum; n <= lastNum; n++) selected.push(doc.line(n));
+  const nonBlank = selected.filter((l) => l.text.trim() !== '');
+  const turnOff = nonBlank.length > 0 && nonBlank.every((l) => parseListLine(l.text).kind === target);
+
+  const changes: { from: number; to: number; insert: string }[] = [];
+  // Replace ONLY the marker prefix, never the content: the caret keeps its
+  // place in the text, and mapping it forward (assoc 1, below) lands it after
+  // a marker inserted at its position instead of stranding it on the left.
+  const replacePrefix = (line: Line, p: ParsedLine, kind: LineKind, ordinal = 1) => {
+    const insert = renderPrefix(p, kind, ordinal);
+    const oldLen = line.text.length - p.content.length;
+    if (line.text.slice(0, oldLen) !== insert) {
+      changes.push({ from: line.from, to: line.from + oldLen, insert });
+    }
+  };
+  // Seed a marker on a lone empty line so a fresh list can be started.
+  const seed = (line: Line, kind: LineKind, ordinal = 1) => {
+    changes.push({
+      from: line.from,
+      to: line.to,
+      insert: renderPrefix({ indent: '', kind: 'plain', checked: false, content: '' }, kind, ordinal),
+    });
+  };
+
+  if (target === 'numbered' && !turnOff) {
+    // Extend through adjacent already-numbered lines above/below the selection
+    // and resequence the whole run so the ordinals stay contiguous.
+    let startNum = firstNum;
+    while (startNum > 1 && parseListLine(doc.line(startNum - 1).text).kind === 'numbered') startNum--;
+    let endNum = lastNum;
+    while (endNum < doc.lines && parseListLine(doc.line(endNum + 1).text).kind === 'numbered') endNum++;
+    let ordinal = 1;
+    for (let n = startNum; n <= endNum; n++) {
+      const line = doc.line(n);
+      const inSelection = n >= firstNum && n <= lastNum;
+      if (line.text.trim() === '') {
+        if (inSelection && selected.length === 1) seed(line, 'numbered', ordinal++);
+        continue;
+      }
+      const p = parseListLine(line.text);
+      if (inSelection || p.kind === 'numbered') replacePrefix(line, p, 'numbered', ordinal++);
+    }
+  } else {
+    for (const line of selected) {
+      if (line.text.trim() === '') {
+        if (!turnOff && selected.length === 1) seed(line, target);
+        continue;
+      }
+      replacePrefix(line, parseListLine(line.text), turnOff ? 'plain' : target);
+    }
+  }
+
+  if (changes.length > 0) {
+    const set = view.state.changes(changes);
+    view.dispatch({
+      changes: set,
+      selection: { anchor: set.mapPos(range.anchor, 1), head: set.mapPos(range.head, 1) },
+    });
+  }
+}
+
+/** Toggle a `> ` blockquote prefix over every selected line. */
+export function toggleQuote(view: EditorView): void {
+  const { doc } = view.state;
+  const range = view.state.selection.main;
+  const firstNum = doc.lineAt(range.from).number;
+  const lastNum = doc.lineAt(range.to).number;
+
+  const lines: Line[] = [];
+  for (let n = firstNum; n <= lastNum; n++) lines.push(doc.line(n));
+  const nonBlank = lines.filter((l) => l.text.trim() !== '');
+  const turnOff = nonBlank.length > 0 && nonBlank.every((l) => /^\s*>\s?/.test(l.text));
+
+  const changes: { from: number; to: number; insert: string }[] = [];
+  for (const line of lines) {
+    if (turnOff) {
+      const m = /^(\s*)>\s?/.exec(line.text);
+      if (m) changes.push({ from: line.from, to: line.from + m[0].length, insert: m[1] });
+    } else if (line.text.trim() !== '' || lines.length === 1) {
+      changes.push({ from: line.from, to: line.from, insert: '> ' });
+    }
+  }
+  if (changes.length > 0) {
+    const set = view.state.changes(changes);
+    view.dispatch({
+      changes: set,
+      selection: { anchor: set.mapPos(range.anchor, 1), head: set.mapPos(range.head, 1) },
+    });
+  }
 }
 
 function insertWikilink(view: EditorView): void {
@@ -256,9 +426,16 @@ function insertEmbed(view: EditorView): void {
   });
 }
 
-function insertTag(view: EditorView): void {
+export function insertTag(view: EditorView): void {
   const { from, to } = view.state.selection.main;
-  view.dispatch({ changes: { from, to, insert: '#' }, selection: { anchor: from + 1 } });
+  const selected = view.state.sliceDoc(from, to);
+  // With a selection, PREFIX it into a tag (`foo` → `#foo`) rather than
+  // replacing it with a bare `#`.
+  const insert = `#${selected}`;
+  view.dispatch({
+    changes: { from, to, insert },
+    selection: selected ? { anchor: from, head: from + insert.length } : { anchor: from + 1 },
+  });
 }
 
 /** `[text](url)` around the selection, caret over the `url` placeholder. */

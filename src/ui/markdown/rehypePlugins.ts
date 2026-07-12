@@ -82,6 +82,48 @@ function collectText(node: Element): string {
 }
 
 /**
+ * Note transclusions (a[data-embed]) render as block-level cards containing a
+ * nested <Markdown> full of <p>/<h*> children — invalid inside the host
+ * paragraph (React flags div-in-p and p-in-p on every embed). Hoist them out:
+ * a <p> containing note embeds is split into paragraph segments with the
+ * embeds as block siblings. Media embeds (data-media, img) stay inline.
+ */
+export function rehypeHoistEmbeds() {
+  const isNoteEmbed = (c: ElementContent): c is Element =>
+    c.type === 'element' && c.tagName === 'a' && c.properties?.['data-embed'] === 'true';
+  const isBlankText = (c: ElementContent): boolean =>
+    c.type === 'text' && (c as Text).value.trim() === '';
+
+  return (tree: Root) => {
+    visit(tree, 'element', (node: Element, index, parent) => {
+      if (node.tagName !== 'p' || index === undefined || !parent) return;
+      if (!node.children.some(isNoteEmbed)) return;
+
+      const out: ElementContent[] = [];
+      let run: ElementContent[] = [];
+      const flush = () => {
+        if (run.length && !run.every(isBlankText)) {
+          out.push({ ...node, children: run });
+        }
+        run = [];
+      };
+      for (const child of node.children) {
+        if (isNoteEmbed(child)) {
+          flush();
+          out.push(child);
+        } else {
+          run.push(child);
+        }
+      }
+      flush();
+      parent.children.splice(index, 1, ...out);
+      // Re-visit the replacement position (embeds themselves have no <p> kids).
+      return index;
+    });
+  };
+}
+
+/**
  * Rewrites remark-math output and mermaid code fences into custom elements
  * that rehype-react maps to lazy-loaded components:
  *   code.math-inline          -> <math-inline>tex</math-inline>
@@ -139,15 +181,29 @@ function paraIsEmpty(p: Element): boolean {
  * can toggle the exact checkbox in the underlying markdown (E-6).
  */
 export function rehypeTasks() {
+  const findCheckbox = (host: Element): Element | undefined =>
+    host.children.find(
+      (c): c is Element =>
+        c.type === 'element' && c.tagName === 'input' &&
+        (c.properties?.type === 'checkbox' || c.properties?.type === undefined),
+    );
+
   return (tree: Root) => {
     visit(tree, 'element', (node: Element) => {
       if (node.tagName !== 'li') return;
-      const input = node.children.find(
-        (c): c is Element =>
-          c.type === 'element' && c.tagName === 'input' &&
-          (c.properties?.type === 'checkbox' || c.properties?.type === undefined),
-      );
-      if (!input || input.tagName !== 'input') return;
+      // Tight list: the checkbox is a direct child. Loose list (blank lines
+      // between items): remark-rehype wraps the item in a <p>, so look inside
+      // the li's first element child too — without this the item kept its
+      // bullet AND rendered the raw disabled checkbox.
+      let input = findCheckbox(node);
+      if (!input) {
+        const firstEl = node.children.find((c): c is Element => c.type === 'element');
+        if (firstEl?.tagName === 'p') {
+          input = findCheckbox(firstEl);
+          if (input) firstEl.children = firstEl.children.filter((c) => c !== input);
+        }
+      }
+      if (!input) return;
 
       const checked = Boolean(input.properties?.checked);
       const line = node.position?.start.line;
@@ -171,8 +227,9 @@ export function rehypeTasks() {
           children: [],
         },
         {
+          // div, not span: loose-list bodies hold <p> children (flow content).
           type: 'element',
-          tagName: 'span',
+          tagName: 'div',
           properties: { className: ['task__body'] },
           children: rest as ElementContent[],
         },

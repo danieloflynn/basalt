@@ -10,7 +10,7 @@ export default defineConfig({
   testDir: 'tests/visual',
   fullyParallel: true,
   timeout: 60_000,
-  retries: 1,
+  retries: 0,
   snapshotPathTemplate: '{testDir}/__screenshots__/{arg}{ext}',
   expect: {
     toHaveScreenshot: {

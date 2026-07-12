@@ -1,5 +1,6 @@
 import { Preferences } from '@capacitor/preferences';
 import { create } from 'zustand';
+import { DEFAULT_GRAPH_CONFIG, type GraphConfig } from '@/ui/graph/config';
 
 export interface Settings {
   // Vault / connection
@@ -24,11 +25,31 @@ export interface Settings {
 
   // Editor
   editorMode: 'live' | 'source';
-  /** Sticky default view for opened notes (Obsidian's default-view setting). */
+  /** Sticky default view for opened notes (the app's default-view setting). */
   defaultView: 'reading' | 'editing';
+  /** Checking a task moves it below its unchecked siblings (reading view + live preview taps). */
+  sortCheckedToBottom: boolean;
+
+  // Templates
+  /** Vault-relative folder holding template notes (blank falls back to `templates`). */
+  templateFolder: string;
+
+  // New notes
+  /** Where a note created without an explicit folder lands. */
+  newNoteLocation: 'root' | 'folder';
+  /** Target folder when newNoteLocation === 'folder' (vault-relative). */
+  newNoteFolderPath: string;
 
   // Files
   sortOrder: 'name' | 'modified';
+
+  // Hotkeys (desktop global shortcuts). Per-command chord overrides; an
+  // override replaces the default list for that command id, an empty array
+  // explicitly unbinds it. See `src/services/hotkeys.ts` for the defaults.
+  hotkeys?: Record<string, string[]>;
+
+  // Graph view (filters, groups, display, forces — one persisted blob).
+  graph: GraphConfig;
 
   // Multi-vault (ST-6). Each vault is a git working tree in its own dir.
   vaults: VaultInfo[];
@@ -41,6 +62,18 @@ export interface VaultInfo {
   repoUrl: string;
   branch: string;
   username: string;
+  /**
+   * How Basalt treats the vault's files (desktop "opened folder" vaults):
+   * 'git' runs the full commit→fetch→merge→push loop; 'local' means Basalt
+   * only reads and writes files and never touches git. Absent = 'git'
+   * (every app-cloned vault).
+   */
+  mode?: 'git' | 'local';
+}
+
+/** True when the active vault is a files-only vault (no git, no syncing). */
+export function activeVaultIsLocal(settings: Settings): boolean {
+  return settings.vaults.find((v) => v.dir === settings.activeVault)?.mode === 'local';
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -57,7 +90,13 @@ export const DEFAULT_SETTINGS: Settings = {
   fontScale: 1,
   editorMode: 'live',
   defaultView: 'reading',
+  sortCheckedToBottom: true,
+  templateFolder: 'templates',
+  newNoteLocation: 'root',
+  newNoteFolderPath: '',
   sortOrder: 'name',
+  hotkeys: {},
+  graph: DEFAULT_GRAPH_CONFIG,
   vaults: [],
   activeVault: 'vault',
 };

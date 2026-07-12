@@ -9,6 +9,7 @@ export default defineConfig({
   },
   build: { target: 'es2022' },
   test: {
-    include: ['src/**/*.test.ts'], // Playwright owns tests/visual
+    // Playwright owns tests/visual; electron/ holds the desktop git-engine tests.
+    include: ['src/**/*.test.ts', 'electron/**/*.test.ts'],
   },
 });
