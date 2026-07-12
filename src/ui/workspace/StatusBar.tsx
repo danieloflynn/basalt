@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { parseFrontmatter } from '@/lib/frontmatter';
 import { countChars, countWords } from '@/lib/noteStats';
 import { useVault, vaultService } from '@/services';
-import { currentScreen, useNav } from '@/state/nav';
+import { focusedScreen, useNav } from '@/state/nav';
 
 /**
  * Obsidian's bottom-right status bar (desktop only): backlink, property, word
@@ -15,7 +15,9 @@ import { currentScreen, useNav } from '@/state/nav';
  */
 export function StatusBar() {
   const nav = useNav();
-  const screen = currentScreen(nav);
+  // Focused pane's note (= the only pane when no split): counts follow
+  // whichever pane is active, like Obsidian's status bar.
+  const screen = focusedScreen(nav);
   // Bumped by vaultService on every write (autosave included) and on every
   // note load (touchRecents) — the two events that can change these counts.
   const indexVersion = useVault((s) => s.indexVersion);

@@ -5,7 +5,7 @@ import { basename, isHtmlPath, noteTitle, stripExt } from '@/lib/paths';
 import { stripInlineMarkdown } from '@/lib/plaintext';
 import { parseWikilinks } from '@/lib/wikilinks';
 import { useVault, vaultService } from '@/services';
-import { currentScreen, openNote, useNav } from '@/state/nav';
+import { focusedScreen, openNote, useNav } from '@/state/nav';
 import { IconChevronRight, IconList, IconWikilink } from '@/ui/icons';
 
 /**
@@ -75,7 +75,9 @@ export function RightSidebar({ open }: { open: boolean }) {
   const nav = useNav();
   const desktop = useNav((s) => s.desktop);
   const indexVersion = useVault((s) => s.indexVersion);
-  const screen = currentScreen(nav);
+  // Focused pane's note (= the only pane when no split, so mobile is
+  // unchanged): backlinks/outline track whichever pane is active.
+  const screen = focusedScreen(nav);
   const path = screen.name === 'note' || screen.name === 'edit' ? screen.path : null;
 
   const backlinks = useMemo(

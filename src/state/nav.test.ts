@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { currentScreen, openNote, tabLabel, useNav } from './nav';
+import { currentScreen, focusedScreen, openNote, tabLabel, useNav } from './nav';
 
 const nav = () => useNav.getState();
 
@@ -196,15 +196,99 @@ describe('nav reset', () => {
 describe('split pane', () => {
   beforeEach(() => nav().reset());
 
-  it('openToTheRight sets the pane, renamePath follows it, reset clears it', () => {
+  it('openToTheRight creates a focused one-entry pane; closeSplit clears it', () => {
+    nav().push({ name: 'note', path: 'main.md' });
     nav().openToTheRight('a.md');
-    expect(nav().splitPath).toBe('a.md');
+
+    expect(nav().focusedPane).toBe('split');
+    expect(nav().split).toEqual({ history: [{ name: 'note', path: 'a.md' }], index: 0 });
+    expect(focusedScreen(nav())).toEqual({ name: 'note', path: 'a.md' });
+    // The main pane is untouched underneath.
+    expect(currentScreen(nav())).toEqual({ name: 'note', path: 'main.md' });
+
+    nav().closeSplit();
+    expect(nav().split).toBeNull();
+    expect(nav().focusedPane).toBe('main');
+    expect(focusedScreen(nav())).toEqual({ name: 'note', path: 'main.md' });
+  });
+
+  it('openToTheRight honors the global editing view mode', () => {
+    nav().setViewMode('editing');
+    nav().openToTheRight('a.md');
+    expect(focusedScreen(nav())).toEqual({ name: 'edit', path: 'a.md' });
+    nav().setViewMode('reading');
+  });
+
+  it('push and replace land in the focused pane', () => {
+    nav().push({ name: 'note', path: 'main.md' });
+    nav().openToTheRight('a.md');
+
+    nav().push({ name: 'note', path: 'b.md' }); // split is focused
+    expect(nav().split?.history).toHaveLength(2);
+    expect(focusedScreen(nav())).toEqual({ name: 'note', path: 'b.md' });
+    expect(currentScreen(nav())).toEqual({ name: 'note', path: 'main.md' });
+
+    nav().replace({ name: 'edit', path: 'b.md' }); // view toggle in the split
+    expect(focusedScreen(nav())).toEqual({ name: 'edit', path: 'b.md' });
+    expect(nav().split?.history).toHaveLength(2);
+
+    nav().setFocusedPane('main');
+    nav().push({ name: 'note', path: 'c.md' }); // main is focused again
+    expect(currentScreen(nav())).toEqual({ name: 'note', path: 'c.md' });
+    expect(focusedScreen(nav())).toEqual({ name: 'note', path: 'c.md' });
+    expect(nav().split?.history[1]).toEqual({ name: 'edit', path: 'b.md' }); // untouched
+  });
+
+  it('back/forward are pane-scoped, with pane-scoped arrow probes', () => {
+    nav().push({ name: 'note', path: 'main1.md' });
+    nav().push({ name: 'note', path: 'main2.md' });
+    nav().openToTheRight('a.md');
+    nav().push({ name: 'note', path: 'b.md' }); // split history: a → b
+
+    expect(nav().canBackIn('split')).toBe(true);
+    expect(nav().canBackIn('main')).toBe(true);
+
+    expect(nav().back()).toBe(true); // split: b → a
+    expect(focusedScreen(nav())).toEqual({ name: 'note', path: 'a.md' });
+    expect(currentScreen(nav())).toEqual({ name: 'note', path: 'main2.md' }); // main untouched
+    expect(nav().canBackIn('split')).toBe(false);
+    expect(nav().canForwardIn('split')).toBe(true);
+    expect(nav().back()).toBe(false); // split history exhausted — NOT main's
+
+    expect(nav().forward()).toBe(true); // split: a → b
+    expect(focusedScreen(nav())).toEqual({ name: 'note', path: 'b.md' });
+    expect(nav().forward()).toBe(false);
+
+    nav().setFocusedPane('main');
+    expect(nav().back()).toBe(true); // main: main2 → main1
+    expect(currentScreen(nav())).toEqual({ name: 'note', path: 'main1.md' });
+    expect(focusedScreen(nav())).toEqual({ name: 'note', path: 'main1.md' });
+    expect(nav().split?.index).toBe(1); // split untouched
+  });
+
+  it('renamePath rewrites split history entries too', () => {
+    nav().openToTheRight('a.md');
+    nav().push({ name: 'note', path: 'other.md' });
     nav().renamePath('a.md', 'b.md');
-    expect(nav().splitPath).toBe('b.md');
-    nav().renamePath('other.md', 'x.md');
-    expect(nav().splitPath).toBe('b.md');
+    expect(nav().split?.history[0]).toEqual({ name: 'note', path: 'b.md' });
+    expect(nav().split?.history[1]).toEqual({ name: 'note', path: 'other.md' });
+    nav().renamePath('missing.md', 'x.md');
+    expect(nav().split?.history[0]).toEqual({ name: 'note', path: 'b.md' });
+  });
+
+  it('newTab and switchTab refocus the main pane; reset clears the split', () => {
+    nav().openToTheRight('a.md');
+    nav().newTab({ name: 'note', path: 'n.md' });
+    expect(nav().focusedPane).toBe('main');
+    expect(nav().split).not.toBeNull(); // pane stays open, focus moves
+
+    nav().setFocusedPane('split');
+    nav().switchTab(0);
+    expect(nav().focusedPane).toBe('main');
+
     nav().reset();
-    expect(nav().splitPath).toBeNull();
+    expect(nav().split).toBeNull();
+    expect(nav().focusedPane).toBe('main');
   });
 });
 

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { syncService, useSettings, vaultService } from '@/services';
-import { currentScreen, useNav } from '@/state/nav';
+import { focusedScreen, useNav } from '@/state/nav';
 import { defaultNewNoteFolder } from '@/ui/templates';
 import {
   IconBack,
@@ -141,7 +141,9 @@ export function listCommands(): AppCommand[] {
       icon: <IconPencil size={18} />,
       run: () => {
         const nav = useNav.getState();
-        const screen = currentScreen(nav);
+        // Focused pane's screen (= current screen without a split): the pane
+        // header toggle and ⌘E flip whichever pane is active, like Obsidian.
+        const screen = focusedScreen(nav);
         // Sticky, same as the mobile header toggle buttons: flipping the mode
         // also flips the persisted global default (`defaultView` in settings).
         if (screen.name === 'note') {

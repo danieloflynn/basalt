@@ -9,17 +9,20 @@
  * every UI mutation entry point awaits flushActiveEditor() before calling
  * vaultService.
  */
-let activeFlush: (() => Promise<void>) | null = null;
+// A Set, not a single slot: the desktop split pane can mount a second editor
+// beside the main one, and a structural op must flush EVERY open buffer (an
+// extra flush of a clean buffer is a no-op, a missed one loses typing).
+const flushes = new Set<() => Promise<void>>();
 
-/** Register the mounted editor's flush; returns an unregister function. */
+/** Register a mounted editor's flush; returns an unregister function. */
 export function registerEditorFlush(flush: () => Promise<void>): () => void {
-  activeFlush = flush;
+  flushes.add(flush);
   return () => {
-    if (activeFlush === flush) activeFlush = null;
+    flushes.delete(flush);
   };
 }
 
-/** Flush the active editor's buffer to disk, if an editor is mounted. */
+/** Flush every mounted editor's buffer to disk. */
 export async function flushActiveEditor(): Promise<void> {
-  if (activeFlush) await activeFlush();
+  await Promise.all([...flushes].map((f) => f()));
 }

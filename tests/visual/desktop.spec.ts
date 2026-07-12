@@ -426,36 +426,59 @@ test('ctrl-hovering a wikilink floats a page preview of the target note', async 
 });
 
 /**
- * Split pane v1 — Obsidian's "Open to the right": a second reading pane
- * docked beside the main one. The main pane keeps navigating independently;
- * links inside the split navigate the MAIN pane (the split is reference
- * material); the header ✕ closes it.
+ * Split pane — Obsidian's "Open to the right": a FULL second pane with its
+ * own history and editor. Focus follows the clicked pane: links inside the
+ * split navigate the split, the split header's arrows walk the split's own
+ * history, file-tree opens land in whichever pane was last active, the view
+ * toggle edits in place, and the header ✕ closes the pane.
  */
-test('"Open to the right" docks a second reading pane beside the note', async ({ page }) => {
+test('"Open to the right" docks a full second pane with its own history', async ({ page }) => {
   await onboard(page);
-  await page.locator('.filetree').getByRole('button', { name: 'Welcome', exact: true }).click();
+  const main = page.locator('.shell > .screen');
+  const split = page.locator('.split-pane');
+
+  await page.locator('.filetree').getByRole('button', { name: 'Old Note', exact: true }).click();
   await page
     .locator('.filetree')
     .getByRole('button', { name: 'Reading List', exact: true })
     .click({ button: 'right' });
   await page.getByRole('button', { name: 'Open to the right' }).click();
 
-  const split = page.locator('.split-pane');
   await expect(split).toBeVisible();
-  await expect(split.locator('.split-pane__title')).toHaveText('Reading List');
+  await expect(split.locator('.inline-title')).toHaveValue('Reading List');
   await expect(split).toContainText('See also');
-  await expect(page.locator('.inline-title')).toHaveValue('Welcome');
+  await expect(main.locator('.inline-title')).toHaveValue('Old Note');
 
-  // Main-pane navigation leaves the split alone.
-  await page.locator('.filetree').getByRole('button', { name: 'Old Note', exact: true }).click();
-  await expect(page.locator('.inline-title')).toHaveValue('Old Note');
-  await expect(split.locator('.split-pane__title')).toHaveText('Reading List');
-
-  // A wikilink inside the split navigates the MAIN pane; the split stays put.
+  // A wikilink inside the split navigates the SPLIT; the main pane stays put.
   await split.locator('a.wikilink', { hasText: 'Welcome' }).first().click();
-  await expect(page.locator('.inline-title')).toHaveValue('Welcome');
-  await expect(split.locator('.split-pane__title')).toHaveText('Reading List');
+  await expect(split.locator('.inline-title')).toHaveValue('Welcome');
+  await expect(main.locator('.inline-title')).toHaveValue('Old Note');
+
+  // The split header's Back arrow walks the split's own history.
+  await split.getByRole('button', { name: 'Back' }).click();
+  await expect(split.locator('.inline-title')).toHaveValue('Reading List');
+  await expect(main.locator('.inline-title')).toHaveValue('Old Note');
+
+  // The split is the active pane, so a file-tree open lands in it…
+  await page.locator('.filetree').getByRole('button', { name: 'Welcome', exact: true }).click();
+  await expect(split.locator('.inline-title')).toHaveValue('Welcome');
+  await expect(main.locator('.inline-title')).toHaveValue('Old Note');
+
+  // …and after clicking back into the main pane, tree opens land there again.
+  await main.locator('.pane-header__crumb--leaf').click();
+  await page
+    .locator('.filetree')
+    .getByRole('button', { name: 'Reading List', exact: true })
+    .click();
+  await expect(main.locator('.inline-title')).toHaveValue('Reading List');
+  await expect(split.locator('.inline-title')).toHaveValue('Welcome');
+
+  // The split's view toggle switches ITS pane into the editor, in place.
+  await split.getByRole('button', { name: 'Edit note' }).click();
+  await expect(split.locator('.cm-content')).toBeVisible();
+  await expect(main.locator('.cm-content')).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Close split pane' }).click();
   await expect(split).toHaveCount(0);
+  await expect(main.locator('.inline-title')).toHaveValue('Reading List');
 });

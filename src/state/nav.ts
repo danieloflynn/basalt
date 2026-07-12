@@ -97,14 +97,25 @@ interface NavState {
   togglePin: (index: number) => void;
 
   /**
-   * Obsidian's "Open to the right": a second reading pane docked between the
-   * main pane and the backlinks column, showing ONE note. Desktop-only — no
-   * mobile UI sets it. Links inside it navigate the MAIN pane, so the split
-   * stays put as reference material.
+   * Obsidian's split pane ("Open to the right"): a second FULL pane — its own
+   * history, back/forward, reading/editing — docked between the main pane and
+   * the backlinks column. Desktop-only: no mobile UI ever sets it, and with
+   * `split` null every focus-routed operation below degrades to exactly the
+   * single-pane behavior.
+   *
+   * Focus routing (Obsidian's "active pane"): push/replace/back/forward act
+   * on the FOCUSED pane. App sets focus from a capturing mousedown, so a
+   * click's action lands in the pane that was clicked, and sidebar/tree
+   * clicks open in whichever pane was last active.
    */
-  splitPath: string | null;
+  split: Tab | null;
+  focusedPane: 'main' | 'split';
+  setFocusedPane: (pane: 'main' | 'split') => void;
   openToTheRight: (path: string) => void;
   closeSplit: () => void;
+  /** Pane-scoped history probes for the two pane headers' arrow states. */
+  canBackIn: (pane: 'main' | 'split') => boolean;
+  canForwardIn: (pane: 'main' | 'split') => boolean;
 }
 
 export const useNav = create<NavState>((set, get) => ({
@@ -125,6 +136,12 @@ export const useNav = create<NavState>((set, get) => ({
         s.viewMode === 'editing' && screen.name === 'note'
           ? { name: 'edit', path: screen.path, heading: screen.heading }
           : screen;
+      // Focused split pane: navigation lands there (Obsidian's active pane).
+      if (s.focusedPane === 'split' && s.split) {
+        const t = s.split;
+        const history = [...t.history.slice(0, t.index + 1), eff];
+        return { split: { ...t, history, index: history.length - 1 } };
+      }
       const tab = s.tabs[s.active];
       const cur = tab.history[tab.index];
       // A pinned tab's content is locked: navigating to a DIFFERENT file opens
@@ -154,14 +171,21 @@ export const useNav = create<NavState>((set, get) => ({
     }),
 
   replace: (screen) =>
-    set((s) => ({
-      tabs: s.tabs.map((tab, i) => {
-        if (i !== s.active) return tab;
-        const history = [...tab.history];
-        history[tab.index] = screen;
-        return { ...tab, history };
-      }),
-    })),
+    set((s) => {
+      if (s.focusedPane === 'split' && s.split) {
+        const history = [...s.split.history];
+        history[s.split.index] = screen;
+        return { split: { ...s.split, history } };
+      }
+      return {
+        tabs: s.tabs.map((tab, i) => {
+          if (i !== s.active) return tab;
+          const history = [...tab.history];
+          history[tab.index] = screen;
+          return { ...tab, history };
+        }),
+      };
+    }),
 
   renamePath: (from, to) =>
     set((s) => ({
@@ -178,21 +202,36 @@ export const useNav = create<NavState>((set, get) => ({
         });
         return changed ? { ...tab, history } : tab;
       }),
-      splitPath: s.splitPath === from ? to : s.splitPath,
+      split: s.split
+        ? {
+            ...s.split,
+            history: s.split.history.map((screen) =>
+              'path' in screen && screen.path === from ? { ...screen, path: to } : screen,
+            ),
+          }
+        : null,
     })),
 
   back: () => {
-    const { tabs, active, sidebarOpen, rightSidebarOpen, overlay } = get();
+    const { tabs, active, sidebarOpen, rightSidebarOpen, overlay, desktop } = get();
     if (overlay !== 'none') {
       set({ overlay: 'none' });
       return true;
     }
-    if (rightSidebarOpen) {
+    // Draining the drawers belongs to the phone back button; desktop's docked
+    // panels stay put while history navigates (Obsidian).
+    if (!desktop && rightSidebarOpen) {
       set({ rightSidebarOpen: false });
       return true;
     }
-    if (sidebarOpen) {
+    if (!desktop && sidebarOpen) {
       set({ sidebarOpen: false });
+      return true;
+    }
+    const { focusedPane, split } = get();
+    if (focusedPane === 'split' && split) {
+      if (split.index === 0) return false;
+      set({ split: { ...split, index: split.index - 1 } });
       return true;
     }
     const tab = tabs[active];
@@ -205,7 +244,12 @@ export const useNav = create<NavState>((set, get) => ({
   },
 
   forward: () => {
-    const { tabs, active } = get();
+    const { tabs, active, focusedPane, split } = get();
+    if (focusedPane === 'split' && split) {
+      if (split.index >= split.history.length - 1) return false;
+      set({ split: { ...split, index: split.index + 1 } });
+      return true;
+    }
     const tab = tabs[active];
     if (tab.pinned || tab.index >= tab.history.length - 1) return false;
     set({
@@ -214,14 +258,20 @@ export const useNav = create<NavState>((set, get) => ({
     return true;
   },
 
-  canBack: () => {
-    const { tabs, active } = get();
+  canBack: () => get().canBackIn(get().focusedPane),
+
+  canForward: () => get().canForwardIn(get().focusedPane),
+
+  canBackIn: (pane) => {
+    const { tabs, active, split } = get();
+    if (pane === 'split') return !!split && split.index > 0;
     const tab = tabs[active];
     return !tab.pinned && tab.index > 0;
   },
 
-  canForward: () => {
-    const { tabs, active } = get();
+  canForwardIn: (pane) => {
+    const { tabs, active, split } = get();
+    if (pane === 'split') return !!split && split.index < split.history.length - 1;
     const tab = tabs[active];
     return !tab.pinned && tab.index < tab.history.length - 1;
   },
@@ -238,7 +288,8 @@ export const useNav = create<NavState>((set, get) => ({
       sidebarView: 'files',
       overlay: 'none',
       searchSeed: null,
-      splitPath: null,
+      split: null,
+      focusedPane: 'main',
     }),
 
   setDesktop: (v) => set({ desktop: v }),
@@ -275,6 +326,8 @@ export const useNav = create<NavState>((set, get) => ({
       ],
       active: s.tabs.length,
       sidebarOpen: s.desktop ? s.sidebarOpen : false,
+      // A new tab lives in the main strip — focus follows it.
+      focusedPane: 'main',
     })),
 
   closeTab: (index) =>
@@ -291,6 +344,7 @@ export const useNav = create<NavState>((set, get) => ({
     set((s) => ({
       active: Math.max(0, Math.min(index, s.tabs.length - 1)),
       sidebarOpen: s.desktop ? s.sidebarOpen : false,
+      focusedPane: 'main',
     })),
 
   togglePin: (index) =>
@@ -298,14 +352,46 @@ export const useNav = create<NavState>((set, get) => ({
       tabs: s.tabs.map((t, i) => (i === index ? { ...t, pinned: !t.pinned } : t)),
     })),
 
-  splitPath: null,
-  openToTheRight: (path) => set({ splitPath: path }),
-  closeSplit: () => set({ splitPath: null }),
+  split: null,
+  focusedPane: 'main',
+  setFocusedPane: (pane) => set({ focusedPane: pane }),
+  openToTheRight: (path) =>
+    // A fresh one-entry history; the new pane takes focus (Obsidian). The
+    // global view mode applies, same as push's reader→editor reroute.
+    set((s) => ({
+      split: {
+        history: [
+          s.viewMode === 'editing'
+            ? { name: 'edit' as const, path }
+            : { name: 'note' as const, path },
+        ],
+        index: 0,
+      },
+      focusedPane: 'split',
+    })),
+  closeSplit: () => set({ split: null, focusedPane: 'main' }),
 }));
 
 export function currentScreen(state: { tabs: Tab[]; active: number }): Screen {
   const tab = state.tabs[state.active];
   return tab.history[tab.index];
+}
+
+/**
+ * The FOCUSED pane's screen — what the backlinks panel and status bar track
+ * (Obsidian: the right sidebar follows the active pane). Identical to
+ * currentScreen whenever no split is open, so mobile behavior is unchanged.
+ */
+export function focusedScreen(state: {
+  tabs: Tab[];
+  active: number;
+  split: Tab | null;
+  focusedPane: 'main' | 'split';
+}): Screen {
+  if (state.focusedPane === 'split' && state.split) {
+    return state.split.history[state.split.index];
+  }
+  return currentScreen(state);
 }
 
 /** Title-ish description of a tab (its current screen) for the tab switcher. */

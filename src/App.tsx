@@ -1,7 +1,7 @@
 import { App as CapApp } from '@capacitor/app';
 import { Keyboard } from '@capacitor/keyboard';
 import { StatusBar, Style } from '@capacitor/status-bar';
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { getGitEngine, isNativePlatform, setVaultDir } from '@/engine';
 import {
   captureSharedItems,
@@ -9,21 +9,12 @@ import {
   useSettings,
   vaultService,
 } from '@/services';
-import { currentScreen, openNote, useNav, type Screen } from '@/state/nav';
+import { currentScreen, openNote, useNav } from '@/state/nav';
 import { installGlobalHotkeys } from '@/services/hotkeys';
 import { Banners } from '@/ui/components/Banners';
-import { IconCalendar, IconNotePlus } from '@/ui/icons';
-import { ArtifactScreen } from '@/ui/screens/ArtifactScreen';
-import { GraphScreen } from '@/ui/screens/GraphScreen';
-import { HistoryScreen } from '@/ui/screens/HistoryScreen';
-import { NoteScreen } from '@/ui/screens/NoteScreen';
-import { NoteVersionScreen } from '@/ui/screens/NoteVersionScreen';
 import { OnboardingScreen } from '@/ui/screens/OnboardingScreen';
-import { SettingsScreen } from '@/ui/screens/SettingsScreen';
 import { BottomPill } from '@/ui/workspace/BottomPill';
 import { HoverPreviewCard } from '@/ui/components/HoverPreview';
-import { defaultNewNoteFolder } from '@/ui/templates';
-import { SidebarToggle } from '@/ui/workspace/chrome';
 import { DesktopChrome } from '@/ui/workspace/DesktopChrome';
 import { DrawerGestures } from '@/ui/workspace/DrawerGestures';
 import { OverlayHost } from '@/ui/workspace/OverlayHost';
@@ -32,16 +23,11 @@ import { RightSidebar } from '@/ui/workspace/RightSidebar';
 import { Sidebar } from '@/ui/workspace/Sidebar';
 import { SplitPane } from '@/ui/workspace/SplitPane';
 import { StatusBar as DesktopStatusBar } from '@/ui/workspace/StatusBar';
+import { WorkspaceScreen } from '@/ui/workspace/WorkspaceScreen';
 import { useIsDesktop } from '@/ui/hooks/useIsDesktop';
-import { usePullDown } from '@/ui/hooks/usePullDown';
 import './styles/tokens.css';
 import './styles/app.css';
 import './styles/markdown.css';
-
-// CodeMirror is the heaviest chunk — load it only when editing starts (P-4).
-const EditScreen = lazy(() =>
-  import('@/ui/screens/EditScreen').then((m) => ({ default: m.EditScreen })),
-);
 
 type Boot = 'loading' | 'onboarding' | 'ready';
 
@@ -175,14 +161,26 @@ export function App() {
       data-desktop={isDesktop || undefined}
       data-left={isDesktop && sidebarOpen ? '' : undefined}
       data-right={isDesktop && rightSidebarOpen ? '' : undefined}
-      data-split={isDesktop && nav.splitPath !== null ? '' : undefined}
+      data-split={isDesktop && nav.split !== null ? '' : undefined}
+      onMouseDownCapture={(e) => {
+        // Focus follows the clicked pane (Obsidian's active pane): the pane a
+        // mousedown lands in receives the subsequent action's navigation.
+        // Sidebar/chrome clicks leave focus alone, so tree rows keep opening
+        // in the last-active pane. No-op without a split (incl. all of mobile).
+        if (nav.split === null) return;
+        const el = e.target as HTMLElement;
+        const pane = el.closest('.split-pane')
+          ? 'split'
+          : el.closest('.screen')
+            ? 'main'
+            : null;
+        if (pane !== null && pane !== nav.focusedPane) nav.setFocusedPane(pane);
+      }}
     >
       {isDesktop && <Ribbon />}
       {isDesktop && <DesktopChrome />}
       <WorkspaceScreen screen={screen} />
-      {isDesktop && nav.splitPath !== null && (
-        <SplitPane key={nav.splitPath} path={nav.splitPath} />
-      )}
+      {isDesktop && nav.split !== null && <SplitPane />}
       {isDesktop && <DesktopStatusBar />}
       {isDesktop && <HoverPreviewCard />}
       <div className="banners-layer">
@@ -216,74 +214,3 @@ function SidebarLayer({ open }: { open: boolean }) {
   );
 }
 
-function WorkspaceScreen({ screen }: { screen: Screen }) {
-  switch (screen.name) {
-    case 'empty':
-      return <EmptyView />;
-    case 'note':
-      return <NoteScreen key={screen.path} path={screen.path} heading={screen.heading} />;
-    case 'edit':
-      return (
-        <Suspense fallback={<div className="screen" />}>
-          <EditScreen key={screen.path} path={screen.path} />
-        </Suspense>
-      );
-    case 'artifact':
-      return <ArtifactScreen key={screen.path} path={screen.path} />;
-    case 'settings':
-      return <SettingsScreen />;
-    case 'history':
-      return <HistoryScreen path={screen.path} />;
-    case 'noteVersion':
-      return (
-        <NoteVersionScreen path={screen.path} oid={screen.oid} when={screen.when} />
-      );
-    case 'graph':
-      return <GraphScreen path={screen.path} />;
-  }
-}
-
-/** "No file is open" — Obsidian's empty state, Basalt-flavored. */
-function EmptyView() {
-  const nav = useNav();
-  const pullRef = usePullDown<HTMLDivElement>(() => nav.setOverlay('quickopen'));
-  return (
-    <div className="screen" ref={pullRef}>
-      <header className="workspace-top">
-        <SidebarToggle />
-      </header>
-      <div className="state" style={{ justifyContent: 'center' }}>
-        <div className="columns-hero" aria-hidden="true">
-          <div className="col" />
-          <div className="col" />
-          <div className="col" />
-          <div className="col" />
-          <div className="col" />
-        </div>
-        <p className="state__title">No note is open</p>
-        <p className="state__hint">Browse the vault from the top-left, or start writing.</p>
-        <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
-          <button
-            className="btn btn--ghost"
-            style={{ border: '1px solid var(--border)' }}
-            onClick={async () => {
-              const path = await vaultService.openDailyNote();
-              nav.push({ name: 'note', path });
-            }}
-          >
-            <IconCalendar size={18} /> Today
-          </button>
-          <button
-            className="btn btn--primary"
-            onClick={async () => {
-              const path = await vaultService.createNote(defaultNewNoteFolder(), 'Untitled');
-              nav.push({ name: 'edit', path });
-            }}
-          >
-            <IconNotePlus size={18} /> New note
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
