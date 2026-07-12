@@ -343,3 +343,28 @@ test('the graph view uses the pane header and a floating settings card', async (
   await page.getByRole('button', { name: 'Close graph settings' }).click();
   await expect(panel).toHaveCount(0);
 });
+
+/**
+ * Linked mentions show real per-source occurrence counts: a source linking
+ * twice gets a "2" badge and one boxed snippet per occurrence, and the
+ * "Linked mentions" header total counts occurrences, not source notes.
+ */
+test('a source linking twice shows count 2 and two snippets', async ({ page }) => {
+  await onboard(page);
+  // Old Note already links [[Welcome]] once; type two more links into it.
+  await page.locator('.filetree').getByRole('button', { name: 'Old Note', exact: true }).click();
+  await page.getByRole('button', { name: 'Edit note' }).click();
+  await page.locator('.cm-content').click();
+  await page.keyboard.type(' Also [[Welcome]] and [[Welcome]] again. ');
+
+  await page.locator('.filetree').getByRole('button', { name: 'Welcome', exact: true }).click();
+  const panel = page.locator('.sidebar-right');
+  const oldNote = panel.locator('.rightbar__group', {
+    has: page.locator('.rightbar__group-title', { hasText: 'Old Note' }),
+  });
+  await expect(oldNote.locator('.rightbar__group-count')).toHaveText('3');
+  await expect(oldNote.locator('.rightbar__mention')).toHaveCount(3);
+  // Header total = occurrences across all sources: Old Note 3 + Reading List 1
+  // + Sync Pulse artifact 1.
+  await expect(panel.locator('.rightbar__total')).toHaveText('5');
+});

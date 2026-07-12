@@ -224,7 +224,11 @@ export function RightSidebar({ open }: { open: boolean }) {
                     )}
                     <div className="rightbar__title-row">
                       <span className="rightbar__title">Linked mentions</span>
-                      <span className="rightbar__total">{backlinks.length}</span>
+                      {/* Total counts occurrences, not source notes — Obsidian's
+                          header number. */}
+                      <span className="rightbar__total">
+                        {backlinks.reduce((n, b) => n + b.contexts.length, 0)}
+                      </span>
                     </div>
                     {backlinks.length === 0 && (
                       <p className="state__hint" style={{ padding: '12px' }}>
@@ -264,23 +268,24 @@ export function RightSidebar({ open }: { open: boolean }) {
                             >
                               {b.title}
                             </button>
-                            {/* backlinksOf collapses each source note to a single best
-                                context line (per-note, not per-occurrence), so this
-                                group always represents exactly one linked mention —
-                                the badge reflects that real count, not a placeholder. */}
-                            <span className="rightbar__group-count">1</span>
+                            <span className="rightbar__group-count">{b.contexts.length}</span>
                           </div>
-                          {!isCollapsed && b.context && (
-                            <button
-                              type="button"
-                              className="rightbar__mention"
-                              onClick={() => openBacklink(b.path)}
-                            >
-                              <span className="hit__excerpt">
-                                {backlinkContext(b.context, noteTitle(path))}
-                              </span>
-                            </button>
-                          )}
+                          {!isCollapsed &&
+                            b.contexts.map(
+                              (context, i) =>
+                                context && (
+                                  <button
+                                    key={i}
+                                    type="button"
+                                    className="rightbar__mention"
+                                    onClick={() => openBacklink(b.path)}
+                                  >
+                                    <span className="hit__excerpt">
+                                      {backlinkContext(context, noteTitle(path))}
+                                    </span>
+                                  </button>
+                                ),
+                            )}
                         </div>
                       );
                     })}

@@ -40,8 +40,11 @@ export interface SearchHit {
 export interface Backlink {
   path: string;
   title: string;
-  /** Source line(s) around the mention. */
+  /** First context line — kept for the flat mobile list. */
   context: string;
+  /** One context line per link occurrence (a line linking twice appears
+   * twice), so `contexts.length` IS the real mention count per source. */
+  contexts: string[];
 }
 
 interface VaultState {
@@ -725,33 +728,43 @@ export class VaultService {
     return [...sources].sort().map((src) => {
       const text = this.contents.get(src) ?? '';
       const lines = text.split('\n');
-      // Prefer the first line whose link ACTUALLY resolves to this note — a bare
-      // substring match makes short titles ("a", "todo") show unrelated lines.
-      const line =
-        lines.find((l) => this.lineLinksTo(l, src, path)) ??
-        lines.find((l) => l.toLowerCase().includes(title)) ??
-        '';
-      return { path: src, title: noteTitle(src), context: line.trim().slice(0, 160) };
+      // One context per link occurrence, in document order — a line linking
+      // twice is listed twice, so contexts.length is the true mention count.
+      const contexts: string[] = [];
+      for (const l of lines) {
+        const n = this.lineLinkCount(l, src, path);
+        for (let i = 0; i < n; i++) contexts.push(l.trim().slice(0, 160));
+      }
+      if (contexts.length === 0) {
+        // No line resolves individually (e.g. an artifact's <a href> edge) —
+        // fall back to the first line naming the note, as before. Never a bare
+        // substring pick for short titles: the link-count pass above already
+        // caught every resolvable line.
+        const line = lines.find((l) => l.toLowerCase().includes(title)) ?? '';
+        contexts.push(line.trim().slice(0, 160));
+      }
+      return { path: src, title: noteTitle(src), context: contexts[0], contexts };
     });
   }
 
-  /** Does this single line contain a wikilink or markdown link resolving to `target`? */
-  private lineLinksTo(line: string, src: string, target: string): boolean {
+  /** How many wikilinks / markdown links on this single line resolve to `target`? */
+  private lineLinkCount(line: string, src: string, target: string): number {
+    let n = 0;
     for (const lk of parseWikilinks(line)) {
-      if (this.resolver.resolve(lk.target, src) === target) return true;
+      if (this.resolver.resolve(lk.target, src) === target) n++;
     }
     for (const m of line.matchAll(/\]\(([^)\s]+)\)/g)) {
       const href = m[1];
       if (/^[a-z][a-z0-9+.-]*:/i.test(href)) continue;
       try {
         if (this.resolver.resolve(decodeURIComponent(href.replace(/^\.\//, '')), src) === target) {
-          return true;
+          n++;
         }
       } catch {
         // malformed percent-encoding — ignore this candidate
       }
     }
-    return false;
+    return n;
   }
 
   outgoingOf(path: string): string[] {

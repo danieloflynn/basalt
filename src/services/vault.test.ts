@@ -301,3 +301,33 @@ describe('fix 11: backlink context', () => {
     expect(bl[0].context).toBe('and here is the [[a]] link');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Backlink occurrence counts (desktop linked-mentions badges)
+// ---------------------------------------------------------------------------
+describe('backlink occurrence counts', () => {
+  it('lists one context per link occurrence, in document order', async () => {
+    await setup({
+      'Target.md': '# t',
+      'Twice.md': 'first [[Target]] here\nthen [[Target]] and [[Target]] on one line',
+      'Once.md': 'just [[Target]]',
+    });
+    const bl = vaultService.backlinksOf('Target.md');
+    const twice = bl.find((b) => b.path === 'Twice.md')!;
+    expect(twice.contexts).toHaveLength(3);
+    expect(twice.contexts[0]).toBe('first [[Target]] here');
+    // a line linking twice is listed once per occurrence
+    expect(twice.contexts[1]).toBe(twice.contexts[2]);
+    expect(twice.context).toBe(twice.contexts[0]);
+    expect(bl.find((b) => b.path === 'Once.md')!.contexts).toHaveLength(1);
+  });
+
+  it('counts aliased wikilinks and markdown links too', async () => {
+    await setup({
+      'Target.md': '# t',
+      'Mixed.md': 'alias [[Target|see this]]\nmd [link](Target.md)',
+    });
+    const bl = vaultService.backlinksOf('Target.md');
+    expect(bl[0].contexts).toHaveLength(2);
+  });
+});
