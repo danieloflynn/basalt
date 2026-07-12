@@ -9,9 +9,11 @@
  * version keeps the original filename and the local version is preserved as a
  * "Name (conflict <suffix>).ext" copy, then the merge is committed.
  */
+import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import git, { type WalkerEntry } from 'isomorphic-git';
 import http from 'isomorphic-git/http/node';
 import type {
@@ -31,6 +33,97 @@ export interface AuthProvider {
 export interface NetCtx {
   auth: AuthProvider;
   onProgress?: (p: GitProgress) => void;
+  /**
+   * Prefer the system `git` CLI for fetch/push (external "opened folder"
+   * vaults): the CLI transparently uses the user's own credentials — ssh keys,
+   * osxkeychain, credential helpers — where isomorphic-git only speaks HTTPS
+   * with our stored PAT. Falls back to isomorphic-git when git is missing.
+   */
+  preferCli?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// System git (CLI) — network ops with the user's own credentials
+// ---------------------------------------------------------------------------
+
+const execFileP = promisify(execFile);
+
+/**
+ * Environment for non-interactive CLI git: never prompt on the terminal (there
+ * is none — a prompt would hang the sync forever) and make ssh fail fast
+ * instead of asking for passphrases (keys served by the agent still work).
+ * A packaged .app gets a minimal PATH, so common git homes are appended.
+ */
+function cliEnv(): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    PATH: `${process.env.PATH ?? '/usr/bin:/bin'}:/usr/local/bin:/opt/homebrew/bin`,
+    GIT_TERMINAL_PROMPT: '0',
+    GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND ?? 'ssh -oBatchMode=yes',
+  };
+}
+
+let systemGitChecked: boolean | undefined;
+
+export async function hasSystemGit(): Promise<boolean> {
+  if (systemGitChecked === undefined) {
+    systemGitChecked = await execFileP('git', ['--version'], { env: cliEnv() }).then(
+      () => true,
+      () => false,
+    );
+  }
+  return systemGitChecked;
+}
+
+async function runGit(
+  dir: string,
+  args: string[],
+): Promise<{ stdout: string; stderr: string }> {
+  return execFileP('git', ['-C', dir, ...args], {
+    env: cliEnv(),
+    timeout: 120_000,
+    maxBuffer: 16 * 1024 * 1024,
+  });
+}
+
+/** Translate CLI git's auth/network failures into actionable messages. */
+function asFriendlyCliError(e: unknown): Error {
+  const err = e as { stderr?: string; message?: string };
+  const detail = (err.stderr ?? err.message ?? String(e)).trim();
+  if (/terminal prompts disabled|could not read Username|Authentication failed/i.test(detail)) {
+    return new Error(
+      `Command-line git couldn't authenticate for this repository. Run a git fetch ` +
+        `in this folder from a terminal once (so your credential helper stores a ` +
+        `login), or configure git credentials for this remote. (${firstLine(detail)})`,
+    );
+  }
+  if (/permission denied \(publickey\)|host key verification failed/i.test(detail)) {
+    return new Error(
+      `Command-line git couldn't authenticate over ssh. Make sure your ssh key is ` +
+        `loaded (ssh-add) or reachable via your agent. (${firstLine(detail)})`,
+    );
+  }
+  return new Error(firstLine(detail) || 'git command failed');
+}
+
+function firstLine(s: string): string {
+  // Surface the most meaningful stderr line: prefer fatal/error lines.
+  const lines = s.split('\n').map((l) => l.trim()).filter(Boolean);
+  return lines.find((l) => /^(fatal|error):/i.test(l)) ?? lines[0] ?? '';
+}
+
+/** Repo-configured commit identity (resolves local + global config), if any. */
+export async function configAuthor(
+  dir: string,
+): Promise<{ name?: string; email?: string }> {
+  if (!(await hasSystemGit())) return {};
+  const get = (key: string) =>
+    runGit(dir, ['config', key]).then(
+      (r) => r.stdout.trim() || undefined,
+      () => undefined,
+    );
+  const [name, email] = await Promise.all([get('user.name'), get('user.email')]);
+  return { name, email };
 }
 
 const decoder = new TextDecoder();
@@ -477,19 +570,28 @@ export async function fetch(
 ): Promise<{ ahead: number; behind: number }> {
   const branch = await git.currentBranch({ fs, dir, fullname: false });
   if (!branch) throw new Error('fetch: repository has no current branch');
-  await withFriendlyErrors(() =>
-    git.fetch({
-      fs,
-      http,
-      dir,
-      remote: 'origin',
-      ref: branch,
-      singleBranch: true,
-      tags: false,
-      onAuth: onAuthFrom(ctx.auth),
-      onProgress: onProgressFrom(ctx),
-    }),
-  );
+  if (ctx.preferCli && (await hasSystemGit())) {
+    ctx.onProgress?.({ phase: 'Fetching (git)', percent: -1 });
+    try {
+      await runGit(dir, ['fetch', 'origin', branch, '--no-tags']);
+    } catch (e) {
+      throw asFriendlyCliError(e);
+    }
+  } else {
+    await withFriendlyErrors(() =>
+      git.fetch({
+        fs,
+        http,
+        dir,
+        remote: 'origin',
+        ref: branch,
+        singleBranch: true,
+        tags: false,
+        onAuth: onAuthFrom(ctx.auth),
+        onProgress: onProgressFrom(ctx),
+      }),
+    );
+  }
   const oursOid = await git.resolveRef({ fs, dir, ref: 'HEAD' });
   const theirsOid = await git
     .resolveRef({ fs, dir, ref: `refs/remotes/origin/${branch}` })
@@ -517,6 +619,20 @@ async function countTo(dir: string, head: string, stop: string | undefined): Pro
 export async function push(dir: string, ctx: NetCtx): Promise<PushOutcome> {
   const branch = await git.currentBranch({ fs, dir, fullname: false });
   if (!branch) throw new Error('push: repository has no current branch');
+  if (ctx.preferCli && (await hasSystemGit())) {
+    ctx.onProgress?.({ phase: 'Pushing (git)', percent: -1 });
+    try {
+      await runGit(dir, ['push', 'origin', branch]);
+      return { ok: true, rejected: false };
+    } catch (e) {
+      const stderr = String((e as { stderr?: string }).stderr ?? '');
+      // The remote moved underneath us — sync's retry loop pulls and re-pushes.
+      if (/\[rejected\]|non-fast-forward|fetch first/i.test(stderr)) {
+        return { ok: false, rejected: true, message: firstLine(stderr) };
+      }
+      return { ok: false, rejected: false, message: asFriendlyCliError(e).message };
+    }
+  }
   try {
     const res = await git.push({
       fs,

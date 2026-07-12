@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from 'react';
 import type { TreeFolder, TreeNode } from '@/lib/tree';
 import { dirname, isHtmlPath, isMarkdownPath, noteTitle } from '@/lib/paths';
 import {
+  activeVaultIsLocal,
   useSettings,
   useVault,
   vaultService,
@@ -119,7 +120,8 @@ export function Sidebar({ open }: { open: boolean }) {
           </span>
           <span className="vaultbar__stats">{stats}</span>
         </button>
-        <SyncStatus />
+        {/* A local-only vault has nothing to sync — no dead button. */}
+        {!activeVaultIsLocal(settings) && <SyncStatus />}
         <button
           className="iconbtn vaultbar__gear"
           aria-label="Settings"

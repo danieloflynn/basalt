@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { getGitEngine, useSyncProgress } from '@/engine/hooks';
-import { setVaultDir } from '@/engine';
+import { isDesktopPlatform, setVaultDir } from '@/engine';
 import { syncService, useSettings, vaultService } from '@/services';
 import { deviceNoun, keystoreName } from '@/lib/device';
 import { IconBack, IconChevronRight } from '@/ui/icons';
+import { OpenFolderVault } from '@/ui/screens/OpenFolderVault';
 
-type Step = 'welcome' | 'connect' | 'branch' | 'cloning';
+type Step = 'welcome' | 'connect' | 'branch' | 'cloning' | 'folder';
 
 /**
  * Guided setup: repo URL + token -> validate & list branches -> pick branch
@@ -98,6 +99,10 @@ export function OnboardingScreen({
     }
   };
 
+  if (step === 'folder') {
+    return <OpenFolderVault onDone={onDone} onCancel={() => setStep('welcome')} />;
+  }
+
   return (
     <div className="screen" style={{ padding: 'var(--safe-top) 0 var(--safe-bottom)' }}>
       {step === 'welcome' && (
@@ -131,6 +136,15 @@ export function OnboardingScreen({
           >
             Connect a repository
           </button>
+          {isDesktopPlatform && (
+            <button
+              className="btn btn--ghost"
+              style={{ minWidth: 220, border: '1px solid var(--border)' }}
+              onClick={() => setStep('folder')}
+            >
+              Open a folder as vault
+            </button>
+          )}
         </div>
       )}
 

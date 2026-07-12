@@ -11,6 +11,7 @@ import { pathToFileURL } from 'node:url';
 import {
   app,
   BrowserWindow,
+  dialog,
   ipcMain,
   net,
   protocol,
@@ -21,26 +22,57 @@ import type { Author } from '../src/engine/types';
 import { CH } from './ipc';
 import * as engine from './git/engine';
 import * as creds from './services/creds';
+import * as ext from './services/externalVaults';
 import * as vaultFs from './services/vaultFs';
 
 const isDev = !app.isPackaged;
 const DEV_URL = process.env.BASALT_DEV_URL ?? 'http://localhost:5173';
 
+// Test harnesses point this at a scratch dir so dev runs never touch (or
+// depend on) the real profile. No-op in normal launches.
+if (process.env.BASALT_USER_DATA) {
+  app.setPath('userData', process.env.BASALT_USER_DATA);
+}
+
 /**
- * Absolute path of a vault's git working tree, under the app's data dir. `dir`
- * comes from the renderer on every fs/git IPC call; a `..` in it would otherwise
- * escape the vaults sandbox and, via deleteRepo's recursive rm, let a compromised
- * renderer delete arbitrary directories. Resolve and assert containment.
+ * External "opened folder" vaults the user granted through the native picker.
+ * Loaded once at startup; only the picker handler ever adds to it, so the
+ * renderer can't name new absolute paths into existence. See externalVaults.ts
+ * for the resolution rules.
+ */
+let externals: string[] = [];
+const externalsFile = () => path.join(app.getPath('userData'), 'external-vaults.json');
+
+/**
+ * Absolute path of a vault's working tree. `dir` comes from the renderer on
+ * every fs/git IPC call and is either a managed name under userData/vaults or
+ * a registered external folder; anything else throws (a `..` escape would
+ * otherwise let a compromised renderer read — or via deleteRepo's recursive
+ * rm, delete — arbitrary directories).
  */
 function vaultRoot(dir: string): string {
   const base = path.join(app.getPath('userData'), 'vaults');
-  const abs = path.resolve(base, dir);
-  // Must be a strict child of base: rejects `..` escapes AND an empty/"." dir
-  // that would resolve to the vaults root itself (deleteRepo there wipes all).
-  if (!abs.startsWith(base + path.sep)) {
-    throw new Error(`Invalid vault directory: ${dir}`);
-  }
-  return abs;
+  return ext.resolveVaultRoot(base, externals, dir).root;
+}
+
+function isExternalVault(dir: string): boolean {
+  const base = path.join(app.getPath('userData'), 'vaults');
+  return ext.resolveVaultRoot(base, externals, dir).external;
+}
+
+/**
+ * Commit identity for external vaults: prefer the folder's own git config
+ * (local or global user.name/email) over Basalt's built-in defaults, so
+ * commits in a repo the user manages look like their CLI commits. Explicit
+ * Basalt settings (non-default author) still win.
+ */
+async function effectiveAuthor(dir: string, author: Author): Promise<Author> {
+  if (!isExternalVault(dir)) return author;
+  const cfg = await engine.configAuthor(vaultRoot(dir));
+  return {
+    name: author.name === 'Basalt' && cfg.name ? cfg.name : author.name,
+    email: author.email === 'basalt@localhost' && cfg.email ? cfg.email : author.email,
+  };
 }
 
 const credsFile = () => path.join(app.getPath('userData'), 'credentials.json');
@@ -64,11 +96,16 @@ function registerProtocols(): void {
     return net.fetch(pathToFileURL(target).toString());
   });
 
-  // basalt-file://<vaultDir>/<relpath> → a file in that vault's working tree.
+  // basalt-file://<hex(vaultDir)>/<relpath> → a file in that vault's working
+  // tree. The vault dir rides in the URL host, which browsers LOWERCASE — an
+  // absolute external-folder path would be corrupted — so it's hex-encoded
+  // (lowercase hex survives host normalization; fileUrl() below is the only
+  // producer).
   protocol.handle('basalt-file', async (request) => {
     try {
       const url = new URL(request.url);
-      const dir = decodeURIComponent(url.host);
+      if (!/^[0-9a-f]+$/.test(url.host)) return new Response('not found', { status: 404 });
+      const dir = Buffer.from(url.host, 'hex').toString('utf8');
       const rel = decodeURIComponent(url.pathname).replace(/^\/+/, '');
       const root = await fsp.realpath(vaultRoot(dir));
       const abs = path.resolve(root, rel);
@@ -100,7 +137,7 @@ function isInternalUrl(url: string): boolean {
 
 function fileUrl(dir: string, rel: string): string {
   const segs = rel.split('/').map(encodeURIComponent).join('/');
-  return `basalt-file://${encodeURIComponent(dir)}/${segs}`;
+  return `basalt-file://${Buffer.from(dir, 'utf8').toString('hex')}/${segs}`;
 }
 
 function createWindow(): void {
@@ -145,11 +182,43 @@ function createWindow(): void {
 // IPC
 // ---------------------------------------------------------------------------
 
-function netCtx(event: IpcMainInvokeEvent): engine.NetCtx {
+function netCtx(event: IpcMainInvokeEvent, dir?: string): engine.NetCtx {
   return {
     auth: () => creds.getCredentials(credsFile()),
     onProgress: (p) => event.sender.send(CH.gitProgress, p),
+    // Opened-folder vaults sync through the system git CLI so the user's own
+    // credentials (ssh keys, credential helpers) apply; managed vaults keep
+    // the stored-PAT flow.
+    preferCli: dir !== undefined && isExternalVault(dir),
   };
+}
+
+/**
+ * Native folder picker for "Open a folder as vault". The picked folder is
+ * realpath'd and added to the external registry — the ONLY way a path outside
+ * the managed sandbox becomes reachable over the bridge. Returns repo info so
+ * the renderer can offer git syncing when the folder is already a clone.
+ */
+async function pickVaultFolder(): Promise<{
+  dir: string;
+  name: string;
+  repo: Awaited<ReturnType<typeof engine.repoInfo>>;
+} | null> {
+  const win = BrowserWindow.getAllWindows()[0];
+  const res = await dialog.showOpenDialog(win, {
+    title: 'Open folder as vault',
+    buttonLabel: 'Open vault',
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  if (res.canceled || res.filePaths.length === 0) return null;
+  const real = await fsp.realpath(res.filePaths[0]);
+  const managedBase = path.join(app.getPath('userData'), 'vaults');
+  if (real === managedBase || real.startsWith(managedBase + path.sep)) {
+    throw new Error('That folder is already managed by Basalt.');
+  }
+  externals = ext.addExternal(externals, real);
+  await ext.saveRegistry(externalsFile(), externals);
+  return { dir: real, name: path.basename(real), repo: await engine.repoInfo(real) };
 }
 
 function registerIpc(): void {
@@ -160,6 +229,9 @@ function registerIpc(): void {
   h(CH.gitHasCredentials, () => creds.hasCredentials(credsFile()));
   h(CH.gitClearCredentials, () => creds.clearCredentials(credsFile()));
 
+  // Vault folders.
+  h(CH.vaultPickFolder, () => pickVaultFolder());
+
   // Git.
   h(CH.gitListRemoteBranches, (e, opts: { url: string }) =>
     engine.listRemoteBranches(opts.url, netCtx(e)),
@@ -168,18 +240,38 @@ function registerIpc(): void {
     engine.clone(vaultRoot(opts.dir), { url: opts.url, branch: opts.branch }, netCtx(e)),
   );
   h(CH.gitRepoInfo, (_e, opts: { dir: string }) => engine.repoInfo(vaultRoot(opts.dir)));
-  h(CH.gitDeleteRepo, (_e, opts: { dir: string }) => engine.deleteRepo(vaultRoot(opts.dir)));
+  h(CH.gitDeleteRepo, async (_e, opts: { dir: string }) => {
+    // An external vault is the USER'S folder — never recursively delete it.
+    // "Removing" it just revokes the grant; the managed clone case really rms.
+    if (isExternalVault(opts.dir)) {
+      externals = ext.removeExternal(externals, vaultRoot(opts.dir));
+      await ext.saveRegistry(externalsFile(), externals);
+      return;
+    }
+    return engine.deleteRepo(vaultRoot(opts.dir));
+  });
   h(CH.gitStatus, async (_e, opts: { dir: string }) => ({
     dirty: await engine.status(vaultRoot(opts.dir)),
   }));
-  h(CH.gitCommitAll, (_e, opts: { dir: string; message: string; author: Author }) =>
-    engine.commitAll(vaultRoot(opts.dir), opts.message, opts.author),
+  h(CH.gitCommitAll, async (_e, opts: { dir: string; message: string; author: Author }) =>
+    engine.commitAll(
+      vaultRoot(opts.dir),
+      opts.message,
+      await effectiveAuthor(opts.dir, opts.author),
+    ),
   );
-  h(CH.gitFetch, (e, opts: { dir: string }) => engine.fetch(vaultRoot(opts.dir), netCtx(e)));
-  h(CH.gitMerge, (_e, opts: { dir: string; conflictSuffix: string; author: Author }) =>
-    engine.merge(vaultRoot(opts.dir), { conflictSuffix: opts.conflictSuffix, author: opts.author }),
+  h(CH.gitFetch, (e, opts: { dir: string }) =>
+    engine.fetch(vaultRoot(opts.dir), netCtx(e, opts.dir)),
   );
-  h(CH.gitPush, (e, opts: { dir: string }) => engine.push(vaultRoot(opts.dir), netCtx(e)));
+  h(CH.gitMerge, async (_e, opts: { dir: string; conflictSuffix: string; author: Author }) =>
+    engine.merge(vaultRoot(opts.dir), {
+      conflictSuffix: opts.conflictSuffix,
+      author: await effectiveAuthor(opts.dir, opts.author),
+    }),
+  );
+  h(CH.gitPush, (e, opts: { dir: string }) =>
+    engine.push(vaultRoot(opts.dir), netCtx(e, opts.dir)),
+  );
   h(CH.gitLog, (_e, opts: { dir: string; limit?: number; path?: string }) =>
     engine.log(vaultRoot(opts.dir), { limit: opts.limit, path: opts.path }),
   );
@@ -213,7 +305,8 @@ function registerIpc(): void {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  externals = await ext.loadRegistry(externalsFile());
   registerProtocols();
   registerIpc();
   createWindow();

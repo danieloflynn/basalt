@@ -32,6 +32,9 @@ const api: BasaltBridge = {
       return () => ipcRenderer.removeListener(CH.gitProgress, listener);
     },
   },
+  vault: {
+    pickFolder: () => ipcRenderer.invoke(CH.vaultPickFolder),
+  },
   fs: {
     list: (dir) => ipcRenderer.invoke(CH.fsList, dir),
     read: (dir, path) => ipcRenderer.invoke(CH.fsRead, dir, path),

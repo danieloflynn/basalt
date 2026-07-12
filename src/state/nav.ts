@@ -279,18 +279,19 @@ export const useNav = create<NavState>((set, get) => ({
   reset: () =>
     // Clear per-vault UI state on a vault switch. searchSeed must be cleared or
     // the previous vault's seeded tag/search query resurfaces in the new vault.
-    // (viewMode is a global pref, deliberately NOT reset here.)
-    set({
+    // (viewMode is a global pref, deliberately NOT reset here.) Desktop keeps
+    // its docked panels — only the phone drawers close.
+    set((s) => ({
       tabs: [newTabState()],
       active: 0,
-      sidebarOpen: false,
-      rightSidebarOpen: false,
+      sidebarOpen: s.desktop,
+      rightSidebarOpen: s.desktop,
       sidebarView: 'files',
       overlay: 'none',
       searchSeed: null,
       split: null,
       focusedPane: 'main',
-    }),
+    })),
 
   setDesktop: (v) => set({ desktop: v }),
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),

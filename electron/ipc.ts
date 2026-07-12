@@ -27,4 +27,6 @@ export const CH = {
   fsRmdir: 'fs:rmdir',
   fsFileUrl: 'fs:fileUrl',
   openExternal: 'shell:openExternal',
+  /** Native folder picker for "Open a folder as vault" (desktop only). */
+  vaultPickFolder: 'vault:pickFolder',
 } as const;

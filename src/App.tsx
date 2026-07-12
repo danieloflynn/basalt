@@ -4,6 +4,7 @@ import { StatusBar, Style } from '@capacitor/status-bar';
 import { useEffect, useState } from 'react';
 import { getGitEngine, isNativePlatform, setVaultDir } from '@/engine';
 import {
+  activeVaultIsLocal,
   captureSharedItems,
   syncService,
   useSettings,
@@ -66,13 +67,20 @@ export function App() {
         .repoInfo({ dir: settings.activeVault })
         .catch(() => ({ exists: false }));
 
-      if (settings.setupComplete && info.exists) {
-        await vaultService.initialize();
-        syncService.applySettings();
-        setBoot('ready');
-        void syncService.onAppActive();
-        const shared = await captureSharedItems();
-        if (shared) openNote(shared);
+      // Local-only folder vaults (desktop) have no repo to find — the vault is
+      // valid if its files load. A vanished folder falls back to onboarding.
+      const localVault = activeVaultIsLocal(settings);
+      if (settings.setupComplete && (info.exists || localVault)) {
+        try {
+          await vaultService.initialize();
+          syncService.applySettings();
+          setBoot('ready');
+          void syncService.onAppActive();
+          const shared = await captureSharedItems();
+          if (shared) openNote(shared);
+        } catch {
+          setBoot('onboarding');
+        }
       } else {
         setBoot('onboarding');
       }

@@ -5,6 +5,7 @@ import { NativeGitEngine, NativeVaultFS } from './native';
 import type { GitEngine, VaultFS } from './types';
 
 export * from './types';
+export { pickVaultFolder } from './desktop';
 
 /** Default subdirectory of the app's data dir holding the git working tree. */
 export const VAULT_DIR = 'vault';

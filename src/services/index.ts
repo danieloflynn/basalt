@@ -14,7 +14,13 @@ export {
   type SearchHit,
   type Backlink,
 } from './vault';
-export { useSettings, DEFAULT_SETTINGS, type Settings, type VaultInfo } from './settings';
+export {
+  useSettings,
+  DEFAULT_SETTINGS,
+  activeVaultIsLocal,
+  type Settings,
+  type VaultInfo,
+} from './settings';
 
 /**
  * Drain text shared into Basalt from other apps (Android share sheet) into

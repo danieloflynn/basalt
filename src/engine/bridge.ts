@@ -44,6 +44,15 @@ export interface BasaltBridge {
     fileAtCommit(opts: { dir: string; oid: string; path: string }): Promise<string | null>;
     onProgress(cb: (p: GitProgress) => void): () => void;
   };
+  vault: {
+    /**
+     * Native folder picker for "Open a folder as vault". Registers the picked
+     * folder with the main process (the only way an out-of-sandbox path becomes
+     * usable as a vault dir) and reports whether it's already a git clone.
+     * Null when the user cancels.
+     */
+    pickFolder(): Promise<{ dir: string; name: string; repo: RepoInfo } | null>;
+  };
   fs: {
     list(dir: string): Promise<VaultFileInfo[]>;
     read(dir: string, path: string): Promise<string>;

@@ -86,9 +86,17 @@ components.
   methods take a single opts object. `electron/ipc.ts` holds the channel names.
 - **Security invariants (do not weaken):** `contextIsolation:true`,
   `nodeIntegration:false`; the renderer never touches fs/git directly. `vaultRoot(dir)`
-  in main.ts asserts the vault dir is a strict child of `userData/vaults` (a `..`
-  would let `deleteRepo`'s recursive rm escape). `safeJoin`/protocol handlers guard
-  the leaf path with `abs.startsWith(root + sep)`. A `will-navigate` handler locks
+  in main.ts accepts EXACTLY two shapes (logic + tests in
+  `electron/services/externalVaults.ts`): a relative name that is a strict child
+  of `userData/vaults` (a `..` would let `deleteRepo`'s recursive rm escape), or
+  an absolute path that EXACTLY matches the external-vault registry
+  (`userData/external-vaults.json`) — which only the main-process folder-picker
+  dialog ("Open a folder as vault") ever appends to, so the renderer can never
+  name new paths into existence. `deleteRepo` on an external vault only
+  deregisters it; it NEVER recursively deletes a user folder. `safeJoin`/protocol
+  handlers guard the leaf path with `abs.startsWith(root + sep)`; the
+  `basalt-file://` host carries the vault dir hex-encoded (URL hosts are
+  lowercased — a raw absolute path would corrupt). A `will-navigate` handler locks
   top-level nav to `app://`/dev-URL (origin-compared, so a dev reload's trailing
   slash still counts as internal) so the privileged bridge can't ride into a
   remote origin (external links → `shell.openExternal`). The PAT is stored ONLY via
@@ -99,6 +107,22 @@ components.
   `assertNoSymlinkInLeadingPath`), and the `basalt-file://` handler `realpath`s the
   target and re-checks vault containment so a vault symlink can't stream out-of-vault
   bytes to the webview. Don't remove these when touching the write/serve paths.
+- **Folder vaults & sync modes (desktop).** "Open a folder as vault" (onboarding
+  welcome + vault menu, gated on `isDesktopPlatform`) opens any disk folder via
+  the flow in `src/ui/screens/OpenFolderVault.tsx`. Per-vault
+  `VaultInfo.mode: 'git' | 'local'` (absent = git): 'local' means Basalt ONLY
+  reads/writes files — SyncService no-ops (guards in notifyEdit/syncNow), the
+  vault-bar sync button hides, settings shows a local-only note, and it never
+  runs `git init` behind the user's back (repo-less folders are always local).
+  External GIT vaults fetch/push through the **system git CLI**
+  (`NetCtx.preferCli`, set in main.ts when the dir is external) so the user's
+  own credentials apply — ssh keys and credential helpers — with
+  `GIT_TERMINAL_PROMPT=0` + ssh BatchMode so a missing login fails fast instead
+  of hanging; commit identity prefers the repo's `git config user.name/email`
+  over Basalt defaults. Managed (app-cloned) vaults keep the isomorphic-git +
+  Keychain-PAT flow untouched; local ops (status/commit/merge) stay
+  isomorphic-git everywhere. CLI path tested against a `file://` bare remote in
+  `electron/git/engine.cli.node.test.ts`.
 - **`electron/git/engine.ts` mirrors the JGit plugin's "never lose data" promise.**
   Same content-hash status (`changesVsHead` re-hashes each `.gitignore`-enumerated
   path, so a same-size/same-mtime edit isn't missed) and same conflict-keep-both

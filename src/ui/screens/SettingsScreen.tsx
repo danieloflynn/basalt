@@ -1,6 +1,13 @@
 import { useEffect, useState } from 'react';
 import { getGitEngine, setVaultDir } from '@/engine';
-import { syncService, useSettings, useSync, vaultService, type VaultInfo } from '@/services';
+import {
+  activeVaultIsLocal,
+  syncService,
+  useSettings,
+  useSync,
+  vaultService,
+  type VaultInfo,
+} from '@/services';
 import { useNav } from '@/state/nav';
 import { deviceNoun } from '@/lib/device';
 import { timeAgo } from '@/ui/components/SyncStatus';
@@ -72,7 +79,10 @@ export function SettingsScreen() {
                     )}
                   </p>
                   <p className="setting__desc">
-                    {v.repoUrl.replace(/^https:\/\/github\.com\//, '').replace(/\.git$/, '')} · {v.branch}
+                    {v.repoUrl
+                      ? `${v.repoUrl.replace(/^https:\/\/github\.com\//, '').replace(/\.git$/, '')} · ${v.branch}`
+                      : v.dir}
+                    {v.mode === 'local' ? ' · local only' : ''}
                     {v.dir === settings.activeVault && lastSyncAt
                       ? ` · synced ${timeAgo(lastSyncAt)}${pendingCount > 0 ? ` · ${pendingCount} pending` : ''}`
                       : ''}
@@ -117,6 +127,19 @@ export function SettingsScreen() {
 
         <div className="group">
           <p className="group__label">Sync</p>
+          {activeVaultIsLocal(settings) ? (
+            <div className="card">
+              <div className="setting">
+                <div className="setting__body">
+                  <p className="setting__label">Local-only vault</p>
+                  <p className="setting__desc">
+                    Basalt edits this folder's files directly and never touches git — there is
+                    nothing to sync.
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : (
           <div className="card">
             <ToggleSetting
               label="Sync when app opens"
@@ -155,6 +178,7 @@ export function SettingsScreen() {
               }}
             />
           </div>
+          )}
         </div>
 
         <div className="group">
@@ -282,7 +306,13 @@ export function SettingsScreen() {
       {removing && (
         <Dialog
           title={`Remove "${removing.name}"?`}
-          message="Un-synced local changes in this vault will be lost. Everything already pushed is safe on GitHub."
+          message={
+            // Opened folders stay on disk — Basalt only forgets them. Managed
+            // clones are really deleted from the app's storage.
+            removing.dir.startsWith('/')
+              ? 'The folder and its files stay on disk — Basalt just stops opening it.'
+              : 'Un-synced local changes in this vault will be lost. Everything already pushed is safe on GitHub.'
+          }
           confirmLabel="Remove"
           danger
           onCancel={() => setRemoving(null)}

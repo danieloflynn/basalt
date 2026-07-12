@@ -62,6 +62,18 @@ export interface VaultInfo {
   repoUrl: string;
   branch: string;
   username: string;
+  /**
+   * How Basalt treats the vault's files (desktop "opened folder" vaults):
+   * 'git' runs the full commit→fetch→merge→push loop; 'local' means Basalt
+   * only reads and writes files and never touches git. Absent = 'git'
+   * (every app-cloned vault).
+   */
+  mode?: 'git' | 'local';
+}
+
+/** True when the active vault is a files-only vault (no git, no syncing). */
+export function activeVaultIsLocal(settings: Settings): boolean {
+  return settings.vaults.find((v) => v.dir === settings.activeVault)?.mode === 'local';
 }
 
 export const DEFAULT_SETTINGS: Settings = {

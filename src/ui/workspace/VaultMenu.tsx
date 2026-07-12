@@ -1,20 +1,35 @@
 import { useState } from 'react';
-import { setVaultDir } from '@/engine';
+import { isDesktopPlatform, setVaultDir } from '@/engine';
 import { syncService, useSettings, vaultService } from '@/services';
 import { useNav } from '@/state/nav';
-import { IconPlus } from '@/ui/icons';
+import { IconFolder, IconPlus } from '@/ui/icons';
 import { OnboardingScreen } from '@/ui/screens/OnboardingScreen';
+import { OpenFolderVault } from '@/ui/screens/OpenFolderVault';
 
 /** Vault switcher popup (mirrors Obsidian's "Manage vaults…" menu). */
 export function VaultMenu({ onClose }: { onClose: () => void }) {
   const { settings, update } = useSettings();
-  const [adding, setAdding] = useState(false);
+  const [adding, setAdding] = useState<false | 'clone' | 'folder'>(false);
 
-  if (adding) {
+  if (adding === 'clone') {
     return (
       <div className="vault-add-overlay">
         <OnboardingScreen
           mode="add"
+          onDone={() => {
+            setAdding(false);
+            onClose();
+          }}
+          onCancel={() => setAdding(false)}
+        />
+      </div>
+    );
+  }
+
+  if (adding === 'folder') {
+    return (
+      <div className="vault-add-overlay">
+        <OpenFolderVault
           onDone={() => {
             setAdding(false);
             onClose();
@@ -58,12 +73,20 @@ export function VaultMenu({ onClose }: { onClose: () => void }) {
             />
           </button>
         ))}
-        <button className="vault-menu__item" onClick={() => setAdding(true)}>
+        <button className="vault-menu__item" onClick={() => setAdding('clone')}>
           Add vault…
           <span className="vault-menu__action" aria-hidden="true">
             <IconPlus size={20} />
           </span>
         </button>
+        {isDesktopPlatform && (
+          <button className="vault-menu__item" onClick={() => setAdding('folder')}>
+            Open folder as vault…
+            <span className="vault-menu__action" aria-hidden="true">
+              <IconFolder size={20} />
+            </span>
+          </button>
+        )}
       </div>
     </>
   );

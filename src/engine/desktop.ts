@@ -24,6 +24,18 @@ function bridge(): BasaltBridge {
   return b;
 }
 
+/**
+ * "Open a folder as vault" (desktop only): native picker → registered external
+ * vault. Callers gate on isDesktopPlatform; null means the user cancelled.
+ */
+export function pickVaultFolder(): Promise<{
+  dir: string;
+  name: string;
+  repo: RepoInfo;
+} | null> {
+  return bridge().vault.pickFolder();
+}
+
 export class DesktopGitEngine implements GitEngine {
   setCredentials(opts: { username: string; token: string }): Promise<void> {
     return bridge().git.setCredentials(opts);
