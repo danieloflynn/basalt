@@ -1,7 +1,7 @@
 import { App as CapApp } from '@capacitor/app';
 import { Keyboard } from '@capacitor/keyboard';
 import { StatusBar, Style } from '@capacitor/status-bar';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { getGitEngine, isNativePlatform, setVaultDir } from '@/engine';
 import {
   activeVaultIsLocal,
@@ -11,6 +11,8 @@ import {
   vaultService,
 } from '@/services';
 import { currentScreen, openNote, useNav } from '@/state/nav';
+import { usePaneSizes } from '@/state/paneSizes';
+import { PaneResizers } from '@/ui/workspace/PaneResizers';
 import { installGlobalHotkeys } from '@/services/hotkeys';
 import { Banners } from '@/ui/components/Banners';
 import { OnboardingScreen } from '@/ui/screens/OnboardingScreen';
@@ -54,6 +56,31 @@ export function App() {
       useNav.setState({ sidebarOpen: false, rightSidebarOpen: false });
     }
   }, [isDesktop]);
+
+  // Dragged pane sizes land as CSS variables on the shell, written outside
+  // React so a divider drag never re-renders the workspace tree. Cleared when
+  // leaving desktop so the stylesheet defaults rule the phone layout.
+  const shellRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = shellRef.current;
+    if (!el || !isDesktop) return;
+    const apply = (s: { sidebarW: number; rightbarW: number; splitRatio: number }) => {
+      el.style.setProperty('--sidebar-w', `${s.sidebarW}px`);
+      el.style.setProperty('--rightbar-w', `${s.rightbarW}px`);
+      // Consumed only under [data-split] (see app.css): a lone fr factor < 1
+      // would otherwise leave free space unfilled when no split is open.
+      el.style.setProperty('--main-fr-split', `${s.splitRatio}fr`);
+      el.style.setProperty('--split-fr', `${1 - s.splitRatio}fr`);
+    };
+    apply(usePaneSizes.getState());
+    const unsub = usePaneSizes.subscribe(apply);
+    return () => {
+      unsub();
+      for (const p of ['--sidebar-w', '--rightbar-w', '--main-fr-split', '--split-fr']) {
+        el.style.removeProperty(p);
+      }
+    };
+  }, [isDesktop, boot]);
 
   // Boot: load settings, decide onboarding vs vault.
   useEffect(() => {
@@ -165,6 +192,7 @@ export function App() {
 
   return (
     <div
+      ref={shellRef}
       className="shell"
       data-desktop={isDesktop || undefined}
       data-left={isDesktop && sidebarOpen ? '' : undefined}
@@ -198,6 +226,7 @@ export function App() {
       {showPill && <BottomPill />}
       <SidebarLayer open={sidebarOpen} />
       <RightSidebar open={rightSidebarOpen} />
+      {isDesktop && <PaneResizers />}
       {!isDesktop && <DrawerGestures />}
     </div>
   );

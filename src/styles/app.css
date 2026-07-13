@@ -1633,7 +1633,7 @@ textarea.inline-title::placeholder {
   --split-track: 0px;
 
   display: grid;
-  grid-template-columns: var(--ribbon-w) var(--lw) minmax(0, 1fr) var(--split-track) var(--rw);
+  grid-template-columns: var(--ribbon-w) var(--lw) minmax(0, var(--main-fr, 1fr)) var(--split-track) var(--rw);
   grid-template-rows: var(--titlebar-h) minmax(0, 1fr);
 }
 
@@ -1646,7 +1646,11 @@ textarea.inline-title::placeholder {
 }
 
 .shell[data-desktop][data-split] {
-  --split-track: minmax(0, 1fr);
+  /* The dragged ratio only applies while a split is open: a lone fr track
+     with a factor < 1 would fill just that fraction of the free space and
+     leave the rest empty. With both tracks live the factors sum to 1. */
+  --main-fr: var(--main-fr-split, 1fr);
+  --split-track: minmax(0, var(--split-fr, 1fr));
 }
 
 /* Titlebar owns the whole first row, above every column. */
@@ -1708,6 +1712,62 @@ textarea.inline-title::placeholder {
 
 .shell[data-desktop] > .split-pane .screen {
   min-width: 0;
+}
+
+/* Draggable pane boundaries: 8px invisible hit strips straddling the grid
+   lines (file-tree edge, right-sidebar edge, split divider). Only a 2px line
+   lights up on hover / while dragging, so the resting layout is untouched.
+   Double-click resets the size (handled in PaneResizers). */
+.shell[data-desktop] > .pane-resizer {
+  grid-row: 2;
+  position: relative;
+  z-index: 12;
+  width: 8px;
+  cursor: col-resize;
+}
+
+.shell[data-desktop] > .pane-resizer::after {
+  content: '';
+  position: absolute;
+  inset: 0 3px;
+  background: transparent;
+}
+
+.shell[data-desktop] > .pane-resizer:hover::after {
+  background: var(--border-strong);
+}
+
+.shell[data-desktop] > .pane-resizer[data-dragging]::after {
+  background: var(--ember);
+}
+
+.shell[data-desktop] > .pane-resizer--left {
+  grid-column: 2;
+  justify-self: end;
+  transform: translateX(4px);
+}
+
+.shell[data-desktop] > .pane-resizer--right {
+  grid-column: 5;
+  justify-self: start;
+  transform: translateX(-4px);
+}
+
+.shell[data-desktop] > .pane-resizer--split {
+  grid-column: 4;
+  justify-self: start;
+  transform: translateX(-4px);
+}
+
+/* While a divider drags: col-resize cursor everywhere, no text selection, and
+   artifact iframes must not swallow the pointer stream. */
+body.is-col-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+body.is-col-resizing iframe {
+  pointer-events: none;
 }
 
 /* No dimming scrims, no bottom-pill gutter when docked. */

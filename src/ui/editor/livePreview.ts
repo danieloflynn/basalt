@@ -188,6 +188,14 @@ export function buildDecorations(view: EditorView, options: LivePreviewOptions =
       to,
       enter(node) {
         if (!HIDDEN_MARKS.has(node.name)) return;
+        // URL is only syntax inside [text](url) / ![alt](url), where the link
+        // text carries the meaning. A bare pasted https://… (GFM autolink) or
+        // an <angle-bracket> autolink IS its own visible text — hiding those
+        // made raw links vanish from the editor on inactive lines.
+        if (node.name === 'URL') {
+          const parent = node.node.parent;
+          if (!parent || (parent.name !== 'Link' && parent.name !== 'Image')) return;
+        }
         const line = state.doc.lineAt(node.from).number;
         if (activeLines.has(line)) return;
         if (node.name === 'HeaderMark') {

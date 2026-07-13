@@ -61,6 +61,7 @@ function scrollToHeadingLine(view: EditorView, heading: string): void {
 export function EditScreen({ path }: { path: string }) {
   const nav = useNav();
   const editorFocused = useNav((s) => s.editorFocused);
+  const desktop = useNav((s) => s.desktop);
   // App keys EditScreen on screen.path (not the heading), so read the heading
   // anchor straight from nav — a [[Note#Section]] tap that reroutes to the
   // editor carries it here (App can't forward it as a prop).
@@ -289,8 +290,10 @@ export function EditScreen({ path }: { path: string }) {
       <div ref={hostRef} style={{ flex: 1, minHeight: 0, overflow: 'hidden' }} />
       {!loaded && <div className="state" />}
 
-      {/* Obsidian behavior: the toolbar rides the keyboard, the pill fills in otherwise. */}
-      {editorFocused && <EditorToolbar viewRef={viewRef} />}
+      {/* Obsidian behavior: the toolbar rides the keyboard, the pill fills in
+          otherwise. Phone-only — it stands in for editor shortcuts a soft
+          keyboard can't type; on desktop those live on the real keyboard. */}
+      {editorFocused && !desktop && <EditorToolbar viewRef={viewRef} />}
       {menuOpen && <NoteMenu path={path} onClose={() => setMenuOpen(false)} />}
     </div>
   );

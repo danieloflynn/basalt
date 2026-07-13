@@ -109,3 +109,37 @@ describe('livePreview checkboxes and indentation', () => {
     expect(onLine(spaced, 2).some((d) => d.style?.includes('text-indent'))).toBe(true);
   });
 });
+
+describe('livePreview raw links', () => {
+  // Cursor parked on line 1; the link lives on line 3 (inactive).
+  const CURSOR_AWAY = 'cursor here\n\n';
+
+  it('keeps a bare pasted https:// URL visible on an inactive line', () => {
+    const url = 'https://example.com/some/page';
+    const r = decorate(`${CURSOR_AWAY}${url}\n`, 0);
+    const covering = onLine(r, 3).filter((d) => d.to > d.from && !d.widget && !d.cls);
+    // No replace decoration may swallow the autolink — it IS the visible text.
+    expect(covering).toEqual([]);
+  });
+
+  it('keeps an <angle-bracket> autolink URL visible, hiding only the brackets', () => {
+    const r = decorate(`${CURSOR_AWAY}<https://example.com>\n`, 0);
+    const line = r.lineOf(3);
+    const urlStart = r.doc.indexOf('https://example.com');
+    const hidden = onLine(r, 3).filter((d) => d.to > d.from && !d.widget && !d.cls);
+    // Whatever is hidden on the line must not overlap the URL text itself.
+    for (const d of hidden) {
+      expect(d.to <= urlStart || d.from >= urlStart + 'https://example.com'.length).toBe(true);
+    }
+    expect(line.to - line.from).toBeGreaterThan(0);
+  });
+
+  it('still hides the (url) part of a [text](url) link on an inactive line', () => {
+    const doc = `${CURSOR_AWAY}[site](https://example.com)\n`;
+    const r = decorate(doc, 0);
+    const urlStart = doc.indexOf('https://example.com');
+    expect(
+      onLine(r, 3).some((d) => !d.widget && d.from <= urlStart && d.to >= urlStart + 5),
+    ).toBe(true);
+  });
+});
